@@ -13,6 +13,7 @@
         "branding.js",
         "premium.js",
         "sponsors.js",
+        "focusToggle.js",
         "contentScript.js"
       ],
       "css": ["contentStyles.css"],

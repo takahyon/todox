@@ -403,6 +403,33 @@ class TodoXApp {
       typeof window !== "undefined" && window.TodoxSponsorsManager
         ? new window.TodoxSponsorsManager({ premiumManager: this.premium })
         : null;
+    this.focusToggleApi = null;
+    this.focusToggleState = { mode: "off", remainingMinutes: 0 };
+    this.focusToggleUnsubscribe = null;
+    this.focusToggleButton = null;
+    this.focusToggleBadge = null;
+    this.focusPopover = null;
+    this.focusPopoverForm = null;
+    this.focusPopoverModeRadios = null;
+    this.focusPopoverDurationRadios = null;
+    this.focusPopoverCustomInput = null;
+    this.focusPopoverBgmSelect = null;
+    this.focusPopoverFabToggle = null;
+    this.focusPopoverCloseButton = null;
+    this.focusPopoverOpen = false;
+    this.focusPopoverPreventNextClick = false;
+    this.focusPopoverOutsideHandler = null;
+    this.focusLongPressTimer = null;
+    this.focusOverlay = null;
+    this.focusOverlayLabel = null;
+    this.focusOverlayTimer = null;
+    this.focusOverlayStopButton = null;
+    this.focusOverlaySponsor = null;
+    this.focusOverlaySponsorLink = null;
+    this.focusOverlaySponsorDismiss = null;
+    this.focusOverlaySponsorRequest = null;
+    this.focusFab = null;
+    this.focusConfig = this.resolveFocusConfig();
   }
 
   async start() {
@@ -427,6 +454,8 @@ class TodoXApp {
         console.warn('TodoX failed to load sponsors configuration', error);
       }
     }
+
+    this.initFocusToggle();
 
     const { tasks, history } = await this.storage.load();
     this.tasks = tasks;
@@ -478,7 +507,656 @@ class TodoXApp {
         this.detachStorageListener();
         this.detachStorageListener = null;
       }
+      if (this.focusToggleUnsubscribe) {
+        try {
+          this.focusToggleUnsubscribe();
+        } catch (error) {
+          // ignore cleanup errors
+        }
+        this.focusToggleUnsubscribe = null;
+      }
+      if (this.focusPopoverOutsideHandler) {
+        document.removeEventListener('mousedown', this.focusPopoverOutsideHandler);
+        this.focusPopoverOutsideHandler = null;
+      }
     });
+  }
+
+  resolveFocusConfig() {
+    const config = (typeof window !== 'undefined' && window.TODOX_CONFIG) || {};
+    const shortcutEnabled = typeof config.focusShortcutEnabled === 'boolean' ? config.focusShortcutEnabled : true;
+    const modeValue =
+      typeof config.focusDefaultMode === 'string' ? config.focusDefaultMode.trim().toLowerCase() : '';
+    const defaultMode =
+      modeValue === 'kichiku' || modeValue === 'soft'
+        ? modeValue
+        : modeValue === 'off'
+        ? 'off'
+        : 'soft';
+    const parsedMinutes = Number(config.focusDefaultMinutes);
+    const defaultMinutes = Number.isFinite(parsedMinutes) ? parsedMinutes : 15;
+    const fabEnabled = typeof config.focusFabEnabled === 'boolean' ? config.focusFabEnabled : false;
+    return {
+      shortcutEnabled,
+      defaultMode,
+      defaultMinutes,
+      fabEnabled,
+    };
+  }
+
+  initFocusToggle() {
+    if (typeof window === 'undefined' || !window.TodoxFocusToggle) {
+      return;
+    }
+    try {
+      window.TodoxFocusToggle.init(this.focusConfig);
+    } catch (error) {
+      console.warn('TodoX failed to initialise focus toggle store', error);
+    }
+    try {
+      this.focusToggleApi = window.TodoxFocusToggle.useFocusToggle();
+    } catch (error) {
+      console.warn('TodoX failed to acquire focus toggle API', error);
+      this.focusToggleApi = null;
+    }
+    if (!this.focusToggleApi) {
+      return;
+    }
+    const subscribe =
+      typeof this.focusToggleApi.subscribe === 'function'
+        ? this.focusToggleApi.subscribe
+        : this.focusToggleApi.actions && typeof this.focusToggleApi.actions.subscribe === 'function'
+        ? this.focusToggleApi.actions.subscribe
+        : null;
+    if (subscribe && !this.focusToggleUnsubscribe) {
+      try {
+        this.focusToggleUnsubscribe = subscribe((state) => {
+          this.focusToggleState = state;
+          this.handleFocusStateChange(state);
+        });
+      } catch (error) {
+        console.warn('TodoX focus toggle subscription failed', error);
+      }
+    }
+    if (this.focusToggleApi.state) {
+      this.focusToggleState = this.focusToggleApi.state;
+      this.handleFocusStateChange(this.focusToggleState);
+    }
+  }
+
+  handleFocusStateChange(state) {
+    if (!state) {
+      return;
+    }
+    this.updateFocusToggleUI();
+    this.updateFocusOverlay();
+    this.updateFocusFab();
+    this.updateFocusAudio();
+    this.refreshFocusSponsor();
+  }
+
+  setupFocusToggleButton() {
+    if (!this.focusToggleButton) {
+      return;
+    }
+    this.focusToggleButton.addEventListener('click', (event) => {
+      if (this.focusPopoverPreventNextClick) {
+        this.focusPopoverPreventNextClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      this.handleFocusButtonClick(event);
+    });
+    this.focusToggleButton.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        this.handleFocusButtonClick(event);
+      } else if (event.key === 'ArrowDown' && event.altKey) {
+        event.preventDefault();
+        this.openFocusPopover(this.focusToggleButton);
+      }
+    });
+    this.focusToggleButton.addEventListener('pointerdown', (event) => {
+      this.handleFocusPointerDown(event);
+    });
+    this.focusToggleButton.addEventListener('pointerup', () => {
+      this.clearFocusLongPressTimer();
+    });
+    this.focusToggleButton.addEventListener('pointerleave', () => {
+      this.clearFocusLongPressTimer();
+    });
+    this.focusToggleButton.addEventListener('pointercancel', () => {
+      this.clearFocusLongPressTimer();
+    });
+  }
+
+  handleFocusPointerDown(event) {
+    if (!event) {
+      return;
+    }
+    if (event.button !== 0 && event.pointerType !== 'touch') {
+      return;
+    }
+    if (!this.focusToggleButton) {
+      return;
+    }
+    this.clearFocusLongPressTimer();
+    this.focusLongPressTimer = setTimeout(() => {
+      this.focusPopoverPreventNextClick = true;
+      this.openFocusPopover(this.focusToggleButton);
+    }, 400);
+  }
+
+  clearFocusLongPressTimer() {
+    if (this.focusLongPressTimer) {
+      clearTimeout(this.focusLongPressTimer);
+      this.focusLongPressTimer = null;
+    }
+  }
+
+  handleFocusButtonClick(event) {
+    if (!this.focusToggleApi || !this.focusToggleApi.actions) {
+      return;
+    }
+    this.clearFocusLongPressTimer();
+    if (this.focusPopoverOpen) {
+      this.closeFocusPopover();
+    }
+    const mode = this.focusToggleState?.mode || 'off';
+    if (mode === 'off') {
+      if (event && event.shiftKey && typeof this.focusToggleApi.actions.cycle === 'function') {
+        this.focusToggleApi.actions.cycle();
+      } else if (typeof this.focusToggleApi.actions.cycle === 'function') {
+        this.focusToggleApi.actions.cycle();
+      }
+      return;
+    }
+    if (event && event.shiftKey && typeof this.focusToggleApi.actions.cycle === 'function') {
+      this.focusToggleApi.actions.cycle();
+    } else if (typeof this.focusToggleApi.actions.stop === 'function') {
+      this.focusToggleApi.actions.stop();
+    }
+  }
+
+  ensureFocusPopover() {
+    if (this.focusPopover) {
+      return this.focusPopover;
+    }
+    const popover = document.createElement('div');
+    popover.className = 'todox-focus-popover';
+    popover.role = 'dialog';
+    popover.setAttribute('aria-modal', 'true');
+    popover.setAttribute('hidden', '');
+    popover.innerHTML = `
+      <form class="todox-focus-popover__form">
+        <header class="todox-focus-popover__header">
+          <h3 class="todox-focus-popover__title">Focus モード</h3>
+          <button type="button" class="todox-focus-popover__close" aria-label="閉じる">×</button>
+        </header>
+        <fieldset class="todox-focus-popover__group">
+          <legend>モード</legend>
+          <label class="todox-focus-popover__option">
+            <input type="radio" name="focusMode" value="soft" />
+            <span>Soft</span>
+          </label>
+          <label class="todox-focus-popover__option">
+            <input type="radio" name="focusMode" value="kichiku" />
+            <span>Kichiku</span>
+          </label>
+        </fieldset>
+        <fieldset class="todox-focus-popover__group">
+          <legend>時間 (分)</legend>
+          <div class="todox-focus-popover__durations"></div>
+          <label class="todox-focus-popover__option todox-focus-popover__option--custom">
+            <input type="number" name="customMinutes" min="1" max="120" inputmode="numeric" />
+            <span>カスタム</span>
+          </label>
+        </fieldset>
+        <fieldset class="todox-focus-popover__group todox-focus-popover__group--bgm" hidden>
+          <legend>BGM</legend>
+          <label class="todox-focus-popover__option">
+            <span class="todox-focus-popover__select-label">トラック</span>
+            <select name="focusBgm">
+              <option value="none">BGMなし</option>
+              <option value="cafe">Cafe ambience</option>
+              <option value="white">White noise</option>
+            </select>
+          </label>
+        </fieldset>
+        <label class="todox-focus-popover__fab">
+          <input type="checkbox" name="focusFab" />
+          <span>フローティングボタンを表示</span>
+        </label>
+        <footer class="todox-focus-popover__footer">
+          <button type="submit" class="todox-focus-popover__primary">開始</button>
+          <button type="button" class="todox-focus-popover__cancel">キャンセル</button>
+        </footer>
+      </form>
+    `;
+    document.body.appendChild(popover);
+    this.focusPopover = popover;
+    this.focusPopoverForm = popover.querySelector('.todox-focus-popover__form');
+    this.focusPopoverModeRadios = Array.from(popover.querySelectorAll('input[name="focusMode"]'));
+    this.focusPopoverDurationRadios = [];
+    this.focusPopoverCustomInput = popover.querySelector('input[name="customMinutes"]');
+    this.focusPopoverBgmSelect = popover.querySelector('select[name="focusBgm"]');
+    this.focusPopoverFabToggle = popover.querySelector('input[name="focusFab"]');
+    this.focusPopoverCloseButton = popover.querySelector('.todox-focus-popover__close');
+    const cancelButton = popover.querySelector('.todox-focus-popover__cancel');
+    this.focusPopoverForm?.addEventListener('submit', (event) => this.handleFocusPopoverSubmit(event));
+    cancelButton?.addEventListener('click', () => this.closeFocusPopover());
+    this.focusPopoverCloseButton?.addEventListener('click', () => this.closeFocusPopover());
+    popover.addEventListener('keydown', (event) => this.handleFocusPopoverKeydown(event));
+    if (!this.focusPopoverOutsideHandler) {
+      this.focusPopoverOutsideHandler = (event) => {
+        if (!this.focusPopoverOpen) {
+          return;
+        }
+        if (this.focusPopover && !this.focusPopover.contains(event.target)) {
+          this.closeFocusPopover();
+        }
+      };
+      document.addEventListener('mousedown', this.focusPopoverOutsideHandler);
+    }
+    return popover;
+  }
+
+  openFocusPopover(anchor) {
+    if (!this.focusToggleApi || !this.focusToggleApi.actions) {
+      return;
+    }
+    const popover = this.ensureFocusPopover();
+    if (!popover) {
+      return;
+    }
+    this.populateFocusPopover();
+    popover.removeAttribute('hidden');
+    this.focusPopoverOpen = true;
+    this.positionFocusPopover(anchor, popover);
+    const focusTarget = this.focusPopoverForm?.querySelector('input[name="focusMode"]:checked');
+    (focusTarget || this.focusPopoverForm)?.focus();
+  }
+
+  closeFocusPopover() {
+    if (!this.focusPopoverOpen || !this.focusPopover) {
+      return;
+    }
+    this.focusPopover.setAttribute('hidden', '');
+    this.focusPopoverOpen = false;
+    this.focusPopoverPreventNextClick = false;
+    if (this.focusToggleButton) {
+      this.focusToggleButton.focus();
+    }
+  }
+
+  populateFocusPopover() {
+    if (!this.focusToggleApi || !this.focusToggleApi.actions) {
+      return;
+    }
+    const state = this.focusToggleState || { mode: 'off', remainingMinutes: 0 };
+    const lastSelection = this.focusToggleApi.actions.getLastSelection
+      ? this.focusToggleApi.actions.getLastSelection()
+      : { mode: 'soft', durations: { soft: 15, kichiku: 15 } };
+    const activeMode = state.mode !== 'off' ? state.mode : lastSelection.mode || 'soft';
+    this.focusPopoverModeRadios?.forEach((radio) => {
+      if (radio) {
+        radio.checked = radio.value === activeMode;
+      }
+    });
+    const durationsContainer = this.focusPopover?.querySelector('.todox-focus-popover__durations');
+    if (durationsContainer) {
+      durationsContainer.innerHTML = '';
+      const baseDurations = [5, 10, 15, 20, 25, 30];
+      baseDurations.forEach((minutes) => {
+        const id = `focus-duration-${minutes}`;
+        const label = document.createElement('label');
+        label.className = 'todox-focus-popover__option';
+        label.innerHTML = `
+          <input type="radio" name="focusDuration" value="${minutes}" id="${id}" />
+          <span>${minutes}分</span>
+        `;
+        durationsContainer.appendChild(label);
+      });
+      this.focusPopoverDurationRadios = Array.from(
+        durationsContainer.querySelectorAll('input[name="focusDuration"]'),
+      );
+    }
+    const preferred = lastSelection?.durations || {};
+    const preferredMinutes = Number(preferred[activeMode]) || 15;
+    let matched = false;
+    this.focusPopoverDurationRadios?.forEach((input) => {
+      if (!input) {
+        return;
+      }
+      if (Number(input.value) === preferredMinutes) {
+        input.checked = true;
+        matched = true;
+      } else {
+        input.checked = false;
+      }
+    });
+    if (this.focusPopoverCustomInput) {
+      this.focusPopoverCustomInput.value = matched ? '' : String(preferredMinutes);
+      this.focusPopoverCustomInput.disabled = !this.premium?.isActive?.();
+    }
+    if (this.focusPopoverFabToggle && this.focusToggleApi.actions.isFabVisible) {
+      const visible = this.focusToggleApi.actions.isFabVisible();
+      this.focusPopoverFabToggle.checked = Boolean(visible);
+    }
+    const bgmGroup = this.focusPopover?.querySelector('.todox-focus-popover__group--bgm');
+    if (bgmGroup) {
+      const canUseBgm = this.canUseBgmFeature();
+      bgmGroup.hidden = !canUseBgm;
+      if (canUseBgm && this.focusPopoverBgmSelect && this.focusToggleApi.actions.getBgmTrack) {
+        this.focusPopoverBgmSelect.value = this.focusToggleApi.actions.getBgmTrack();
+      }
+      if (!canUseBgm && this.focusPopoverBgmSelect) {
+        this.focusPopoverBgmSelect.value = 'none';
+      }
+    }
+  }
+
+  positionFocusPopover(anchor, popover) {
+    if (!anchor || !popover) {
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    const width = popover.offsetWidth || 280;
+    const height = popover.offsetHeight || 240;
+    let top = rect.bottom + 8;
+    let left = rect.left;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    if (left + width > viewportWidth - 12) {
+      left = Math.max(12, viewportWidth - width - 12);
+    }
+    if (top + height > viewportHeight - 12) {
+      top = Math.max(12, rect.top - height - 8);
+    }
+    popover.style.left = `${left}px`;
+    popover.style.top = `${top}px`;
+  }
+
+  handleFocusPopoverKeydown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.closeFocusPopover();
+    }
+    if (event.key === 'Enter' && event.target === this.focusPopover) {
+      event.preventDefault();
+      this.focusPopoverForm?.requestSubmit();
+    }
+  }
+
+  handleFocusPopoverSubmit(event) {
+    event.preventDefault();
+    if (!this.focusToggleApi || !this.focusToggleApi.actions) {
+      this.closeFocusPopover();
+      return;
+    }
+    const modeRadio = this.focusPopoverForm?.querySelector('input[name="focusMode"]:checked');
+    const durationRadio = this.focusPopoverForm?.querySelector('input[name="focusDuration"]:checked');
+    const mode = modeRadio ? modeRadio.value : 'soft';
+    let minutes = durationRadio ? Number(durationRadio.value) : NaN;
+    const customValue = this.focusPopoverCustomInput ? Number(this.focusPopoverCustomInput.value) : NaN;
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      minutes = customValue;
+    }
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      minutes = mode === 'kichiku' ? 20 : 15;
+    }
+    if (this.focusPopoverBgmSelect && this.focusToggleApi.actions.setBgmTrack) {
+      this.focusToggleApi.actions.setBgmTrack(this.focusPopoverBgmSelect.value || 'none');
+    }
+    if (this.focusPopoverFabToggle && this.focusToggleApi.actions.setFabVisible) {
+      this.focusToggleApi.actions.setFabVisible(this.focusPopoverFabToggle.checked);
+    }
+    if (typeof this.focusToggleApi.actions.start === 'function') {
+      this.focusToggleApi.actions.start(mode, minutes);
+    }
+    this.closeFocusPopover();
+  }
+
+  updateFocusToggleUI() {
+    if (!this.focusToggleButton || !this.focusToggleApi) {
+      return;
+    }
+    const labelEl = this.focusToggleButton.querySelector('.todox-focus-toggle__text');
+    const mode = this.focusToggleState?.mode || 'off';
+    const remaining = this.focusToggleState?.remainingMinutes || 0;
+    const isActive = mode !== 'off';
+    this.focusToggleButton.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    this.focusToggleButton.dataset.mode = mode;
+    let label = 'Focus';
+    let tooltip = 'フォーカスモードを開始';
+    if (mode === 'soft') {
+      label = 'Focus · Soft';
+      tooltip = `Soft Focus · ${String(remaining).padStart(2, '0')}m left`;
+    } else if (mode === 'kichiku') {
+      label = 'Focus · Lock';
+      tooltip = `Kichiku · ${String(remaining).padStart(2, '0')}m left`;
+    }
+    if (labelEl) {
+      labelEl.textContent = label;
+    }
+    if (this.focusToggleBadge) {
+      if (isActive) {
+        this.focusToggleBadge.hidden = false;
+        this.focusToggleBadge.textContent = String(Math.max(0, remaining)).padStart(2, '0');
+      } else {
+        this.focusToggleBadge.hidden = true;
+      }
+    }
+    this.focusToggleButton.title = tooltip;
+    const ariaLabelBase = mode === 'off' ? 'フォーカスモードを開始' : 'フォーカスモードを終了';
+    this.focusToggleButton.setAttribute('aria-label', `${ariaLabelBase}${mode === 'off' ? '' : ` (${label})`}`);
+  }
+
+  ensureFocusOverlay() {
+    if (this.focusOverlay) {
+      return this.focusOverlay;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'todox-focus-overlay';
+    overlay.setAttribute('hidden', '');
+    overlay.innerHTML = `
+      <div class="todox-focus-overlay__backdrop" aria-hidden="true"></div>
+      <div class="todox-focus-overlay__panel" role="dialog" aria-modal="true">
+        <p class="todox-focus-overlay__label">Focus</p>
+        <p class="todox-focus-overlay__timer">00分</p>
+        <button type="button" class="todox-focus-overlay__stop">解除</button>
+        <div class="todox-focus-overlay__sponsor" hidden>
+          <span class="todox-focus-overlay__sponsor-badge" aria-hidden="true">💖</span>
+          <a class="todox-focus-overlay__sponsor-link" target="_blank" rel="noopener noreferrer"></a>
+          <button type="button" class="todox-focus-overlay__sponsor-dismiss" aria-label="スポンサーを閉じる">×</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    this.focusOverlay = overlay;
+    this.focusOverlayLabel = overlay.querySelector('.todox-focus-overlay__label');
+    this.focusOverlayTimer = overlay.querySelector('.todox-focus-overlay__timer');
+    this.focusOverlayStopButton = overlay.querySelector('.todox-focus-overlay__stop');
+    this.focusOverlaySponsor = overlay.querySelector('.todox-focus-overlay__sponsor');
+    this.focusOverlaySponsorLink = overlay.querySelector('.todox-focus-overlay__sponsor-link');
+    this.focusOverlaySponsorDismiss = overlay.querySelector('.todox-focus-overlay__sponsor-dismiss');
+    this.focusOverlayStopButton?.addEventListener('click', () => {
+      if (this.focusToggleApi?.actions?.stop) {
+        this.focusToggleApi.actions.stop();
+      }
+    });
+    this.focusOverlaySponsorDismiss?.addEventListener('click', () => {
+      if (this.sponsorsManager && typeof this.sponsorsManager.dismissCurrentSponsor === 'function') {
+        this.sponsorsManager.dismissCurrentSponsor();
+      }
+      this.hideFocusSponsor();
+    });
+    return overlay;
+  }
+
+  updateFocusOverlay() {
+    if (!this.focusToggleApi) {
+      return;
+    }
+    const overlay = this.ensureFocusOverlay();
+    if (!overlay) {
+      return;
+    }
+    const mode = this.focusToggleState?.mode || 'off';
+    const remaining = this.focusToggleState?.remainingMinutes || 0;
+    overlay.dataset.mode = mode;
+    if (mode === 'off') {
+      overlay.setAttribute('hidden', '');
+      document.body.classList.remove('todox-focus-soft', 'todox-focus-kichiku');
+      this.hideFocusSponsor();
+      return;
+    }
+    overlay.removeAttribute('hidden');
+    const labelText = mode === 'kichiku' ? 'Kichiku モード' : 'Soft Focus';
+    if (this.focusOverlayLabel) {
+      this.focusOverlayLabel.textContent = labelText;
+    }
+    if (this.focusOverlayTimer) {
+      this.focusOverlayTimer.textContent = `残り ${String(Math.max(0, remaining)).padStart(2, '0')}分`;
+    }
+    if (this.focusOverlayStopButton) {
+      this.focusOverlayStopButton.hidden = mode !== 'kichiku';
+    }
+    document.body.classList.toggle('todox-focus-soft', mode === 'soft');
+    document.body.classList.toggle('todox-focus-kichiku', mode === 'kichiku');
+  }
+
+  refreshFocusSponsor() {
+    if (!this.focusOverlaySponsor) {
+      return;
+    }
+    if (!this.focusToggleState || this.focusToggleState.mode !== 'kichiku') {
+      this.hideFocusSponsor();
+      return;
+    }
+    if (this.premium?.isActive?.()) {
+      this.hideFocusSponsor();
+      return;
+    }
+    if (!this.sponsorsManager || typeof this.sponsorsManager.selectSponsor !== 'function') {
+      this.hideFocusSponsor();
+      return;
+    }
+    if (this.focusOverlaySponsor && !this.focusOverlaySponsor.hidden && this.focusOverlaySponsorLink?.textContent) {
+      return;
+    }
+    const requestId = Symbol('focusSponsor');
+    this.focusOverlaySponsorRequest = requestId;
+    Promise.resolve(this.sponsorsManager.selectSponsor())
+      .then((sponsor) => {
+        if (this.focusOverlaySponsorRequest !== requestId) {
+          return;
+        }
+        if (!sponsor || !sponsor.label || !sponsor.url) {
+          this.hideFocusSponsor();
+          return;
+        }
+        if (this.focusOverlaySponsorLink) {
+          this.focusOverlaySponsorLink.textContent = sponsor.label;
+          this.focusOverlaySponsorLink.href = sponsor.url;
+        }
+        if (this.focusOverlaySponsor) {
+          this.focusOverlaySponsor.hidden = false;
+        }
+      })
+      .catch(() => {
+        this.hideFocusSponsor();
+      });
+  }
+
+  hideFocusSponsor() {
+    this.focusOverlaySponsorRequest = null;
+    if (this.focusOverlaySponsor) {
+      this.focusOverlaySponsor.hidden = true;
+    }
+    if (this.focusOverlaySponsorLink) {
+      this.focusOverlaySponsorLink.textContent = '';
+      this.focusOverlaySponsorLink.removeAttribute('href');
+    }
+  }
+
+  ensureFocusFab() {
+    if (this.focusFab) {
+      return this.focusFab;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'todox-focus-fab';
+    button.setAttribute('aria-pressed', 'false');
+    button.innerHTML = `
+      <span class="todox-focus-fab__icon" aria-hidden="true">🎯</span>
+      <span class="todox-focus-fab__label">Focus</span>
+      <span class="todox-focus-fab__badge" hidden>00</span>
+    `;
+    button.addEventListener('click', (event) => {
+      if (this.focusPopoverPreventNextClick) {
+        this.focusPopoverPreventNextClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      this.handleFocusButtonClick(event);
+    });
+    button.addEventListener('pointerdown', (event) => this.handleFocusPointerDown(event));
+    button.addEventListener('pointerup', () => this.clearFocusLongPressTimer());
+    button.addEventListener('pointerleave', () => this.clearFocusLongPressTimer());
+    button.addEventListener('pointercancel', () => this.clearFocusLongPressTimer());
+    document.body.appendChild(button);
+    this.focusFab = button;
+    return button;
+  }
+
+  updateFocusFab() {
+    if (!this.focusToggleApi || !this.focusToggleApi.actions) {
+      if (this.focusFab) {
+        this.focusFab.hidden = true;
+      }
+      return;
+    }
+    const isVisible = this.focusToggleApi.actions.isFabVisible
+      ? this.focusToggleApi.actions.isFabVisible()
+      : false;
+    if (!isVisible) {
+      if (this.focusFab) {
+        this.focusFab.hidden = true;
+      }
+      return;
+    }
+    const fab = this.ensureFocusFab();
+    if (!fab) {
+      return;
+    }
+    const labelEl = fab.querySelector('.todox-focus-fab__label');
+    const badge = fab.querySelector('.todox-focus-fab__badge');
+    const mode = this.focusToggleState?.mode || 'off';
+    const remaining = this.focusToggleState?.remainingMinutes || 0;
+    const isActive = mode !== 'off';
+    fab.hidden = false;
+    fab.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    let label = 'Focus';
+    if (mode === 'soft') {
+      label = 'Soft';
+    } else if (mode === 'kichiku') {
+      label = 'Lock';
+    }
+    if (labelEl) {
+      labelEl.textContent = label;
+    }
+    if (badge) {
+      if (isActive) {
+        badge.hidden = false;
+        badge.textContent = String(Math.max(0, remaining)).padStart(2, '0');
+      } else {
+        badge.hidden = true;
+      }
+    }
+    fab.title = this.focusToggleButton ? this.focusToggleButton.title : 'Focus';
   }
 
   waitForSidebar() {
@@ -562,7 +1240,20 @@ class TodoXApp {
       <header class="todox-panel__header">
         <div class="todox-panel__title-row">
           <h2 class="todox-panel__title">TodoX</h2>
-          <button class="todox-history-button" type="button">履歴を開く</button>
+          <div class="todox-panel__title-actions">
+            <button
+              class="todox-focus-toggle"
+              type="button"
+              aria-pressed="false"
+              aria-haspopup="dialog"
+              aria-label="フォーカスモードを開始"
+            >
+              <span class="todox-focus-toggle__icon" aria-hidden="true">🎯</span>
+              <span class="todox-focus-toggle__text">Focus</span>
+              <span class="todox-focus-toggle__badge" hidden>00</span>
+            </button>
+            <button class="todox-history-button" type="button">履歴を開く</button>
+          </div>
         </div>
         <p class="todox-panel__progress" aria-live="polite"></p>
         <p class="todox-panel__hint">Enter でタスク追加、⌘⏎ で即時フォーカス</p>
@@ -684,8 +1375,14 @@ class TodoXApp {
     };
     this.telemetryToggle = container.querySelector('.todox-telemetry-toggle__input');
     this.archiveButton = container.querySelector('.todox-done__archive');
+    this.focusToggleButton = container.querySelector('.todox-focus-toggle');
+    this.focusToggleBadge = container.querySelector('.todox-focus-toggle__badge');
     const historyButton = container.querySelector('.todox-history-button');
     historyButton?.addEventListener('click', () => this.openHistory());
+    if (this.focusToggleButton) {
+      this.setupFocusToggleButton();
+      this.updateFocusToggleUI();
+    }
     this.focusSponsorDismissButton?.addEventListener('click', () => {
       if (this.sponsorsManager && typeof this.sponsorsManager.dismissCurrentSponsor === 'function') {
         this.sponsorsManager.dismissCurrentSponsor();
@@ -862,8 +1559,20 @@ class TodoXApp {
   }
 
   async updateFocusAudio() {
-    const track = this.getSelectedBgm();
-    const shouldPlay = this.canUseBgmFeature() && Boolean(this.activeTaskId);
+    const canPlay = this.canUseBgmFeature();
+    if (!canPlay) {
+      await this.bgmController.update('none', false);
+      return;
+    }
+    const focusActive = this.focusToggleState?.mode && this.focusToggleState.mode !== 'off';
+    let track = this.getSelectedBgm();
+    if (focusActive && this.focusToggleApi?.actions?.getBgmTrack) {
+      const focusTrack = this.focusToggleApi.actions.getBgmTrack();
+      if (focusTrack && focusTrack !== 'none') {
+        track = focusTrack;
+      }
+    }
+    const shouldPlay = Boolean(this.activeTaskId || focusActive);
     await this.bgmController.update(track, shouldPlay);
   }
 
