@@ -116,18 +116,36 @@ body {
 
 .todox-history__footer {
   margin-top: 8px;
-  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
   font-size: 12px;
   color: rgba(247, 249, 249, 0.4);
 }
 
-.todox-history__footer a {
+.todox-history__credit {
+  margin: 0;
+}
+
+.todox-history__promo {
+  font-size: 12px;
+  color: rgba(247, 249, 249, 0.6);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  text-align: right;
+}
+
+.todox-history__footer a,
+.todox-history__promo a {
   color: inherit;
   text-decoration: none;
 }
 
 .todox-history__footer a:hover,
-.todox-history__footer a:focus-visible {
+.todox-history__footer a:focus-visible,
+.todox-history__promo a:hover,
+.todox-history__promo a:focus-visible {
   text-decoration: underline;
 }
 

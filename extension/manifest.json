@@ -7,7 +7,7 @@
   "content_scripts": [
     {
       "matches": ["https://x.com/*", "https://twitter.com/*"],
-      "js": ["contentScript.js"],
+      "js": ["branding.js", "contentScript.js"],
       "css": ["contentStyles.css"],
       "run_at": "document_idle"
     }
@@ -15,6 +15,7 @@
   "web_accessible_resources": [
     {
       "resources": [
+        "branding.js",
         "completed.html",
         "completed.js",
         "completed.css"
