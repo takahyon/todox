@@ -16,6 +16,8 @@ const LOCATION_POLL_INTERVAL_MS = 1000;
 const TIMER_TICK_MS = 1000;
 const SHOOT_ANIMATION_DURATION_MS = 600;
 
+const FOCUS_FEATURE_ENABLED = false;
+
 const PREMIUM_FEATURE_MAP =
   typeof window !== "undefined" && window.TODOX_PREMIUM_FEATURES
     ? window.TODOX_PREMIUM_FEATURES
@@ -396,7 +398,7 @@ class TodoXApp {
     };
     this.telemetryToggle = null;
     this.archiveButton = null;
-    this.bgmController = new FocusBgmController();
+    this.bgmController = FOCUS_FEATURE_ENABLED ? new FocusBgmController() : null;
     this.pendingSponsorRequest = null;
     this.premium = typeof window !== "undefined" ? window.TODOX_PREMIUM : null;
     this.sponsorsManager =
@@ -431,6 +433,16 @@ class TodoXApp {
     const { tasks, history } = await this.storage.load();
     this.tasks = tasks;
     this.history = history;
+    if (!FOCUS_FEATURE_ENABLED) {
+      this.tasks.forEach((task) => {
+        if (task.runningSince) {
+          const now = Date.now();
+          task.elapsedMs += Math.max(0, now - task.runningSince);
+        }
+        task.runningSince = undefined;
+      });
+      this.activeTaskId = null;
+    }
     this.sortTasks();
 
     this.attachStorageListener();
@@ -558,6 +570,16 @@ class TodoXApp {
   createPanel() {
     const container = document.createElement('section');
     container.className = 'todox-panel';
+    const hintText = FOCUS_FEATURE_ENABLED ? 'Enter でタスク追加、⌘⏎ で即時フォーカス' : 'Enter でタスク追加';
+    const focusSponsorMarkup = FOCUS_FEATURE_ENABLED
+      ? `
+        <div class="todox-focus-sponsor" hidden>
+          <span class="todox-focus-sponsor__badge" aria-hidden="true">💖</span>
+          <a class="todox-focus-sponsor__link" target="_blank" rel="noopener noreferrer"></a>
+          <button class="todox-focus-sponsor__dismiss" type="button" aria-label="スポンサーを閉じる">×</button>
+        </div>`
+      : '';
+
     container.innerHTML = `
       <header class="todox-panel__header">
         <div class="todox-panel__title-row">
@@ -565,12 +587,8 @@ class TodoXApp {
           <button class="todox-history-button" type="button">履歴を開く</button>
         </div>
         <p class="todox-panel__progress" aria-live="polite"></p>
-        <p class="todox-panel__hint">Enter でタスク追加、⌘⏎ で即時フォーカス</p>
-        <div class="todox-focus-sponsor" hidden>
-          <span class="todox-focus-sponsor__badge" aria-hidden="true">💖</span>
-          <a class="todox-focus-sponsor__link" target="_blank" rel="noopener noreferrer"></a>
-          <button class="todox-focus-sponsor__dismiss" type="button" aria-label="スポンサーを閉じる">×</button>
-        </div>
+        <p class="todox-panel__hint">${hintText}</p>
+        ${focusSponsorMarkup}
       </header>
       <ul class="todox-list todox-list--active"></ul>
       <section class="todox-done" aria-live="polite">
@@ -862,6 +880,9 @@ class TodoXApp {
   }
 
   async updateFocusAudio() {
+    if (!FOCUS_FEATURE_ENABLED || !this.bgmController) {
+      return;
+    }
     const track = this.getSelectedBgm();
     const shouldPlay = this.canUseBgmFeature() && Boolean(this.activeTaskId);
     await this.bgmController.update(track, shouldPlay);
@@ -879,6 +900,10 @@ class TodoXApp {
   }
 
   async refreshSponsorBanner() {
+    if (!FOCUS_FEATURE_ENABLED) {
+      this.hideSponsorBanner();
+      return;
+    }
     if (!this.focusSponsorEl) {
       return;
     }
@@ -1034,12 +1059,19 @@ class TodoXApp {
     inputItem.className = 'todox-list__item todox-list__item--new';
     const placeholderText = canAddTask
       ? 'ここに入力して Enter で追加'
-      : 'フォーカス中のタスクが落ち着いたら追加しましょう';
+      : FOCUS_FEATURE_ENABLED
+        ? 'フォーカス中のタスクが落ち着いたら追加しましょう'
+        : 'タスクを整理してから追加しましょう';
+    const quickFocusButtonMarkup = FOCUS_FEATURE_ENABLED
+      ? `<button class="todox-action-button todox-action-button--focus" type="button" title="最初のタスクをフォーカス" ${
+          canAddTask ? '' : 'disabled'
+        }>▶︎</button>`
+      : '';
     inputItem.innerHTML = `
       <span class="todox-plus" aria-hidden="true">＋</span>
       <input type="text" class="todox-input" placeholder="${placeholderText}" ${canAddTask ? '' : 'disabled'} />
       <div class="todox-actions">
-        <button class="todox-action-button todox-action-button--focus" type="button" title="最初のタスクをフォーカス" ${canAddTask ? '' : 'disabled'}>▶︎</button>
+        ${quickFocusButtonMarkup}
       </div>
     `;
     this.newTaskInput = inputItem.querySelector('.todox-input');
@@ -1059,7 +1091,7 @@ class TodoXApp {
         event.preventDefault();
         this.handleNewTaskSubmit();
       }
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      if (FOCUS_FEATURE_ENABLED && (event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault();
         const value = this.newTaskInput?.value.trim();
         if (value) {
@@ -1071,16 +1103,18 @@ class TodoXApp {
       }
     });
 
-    quickFocusButton?.addEventListener('click', () => {
-      const value = this.newTaskInput?.value.trim();
-      if (!value) {
-        return;
-      }
-      const task = this.addTask(value);
-      if (task) {
-        this.startFocus(task.id);
-      }
-    });
+    if (FOCUS_FEATURE_ENABLED) {
+      quickFocusButton?.addEventListener('click', () => {
+        const value = this.newTaskInput?.value.trim();
+        if (!value) {
+          return;
+        }
+        const task = this.addTask(value);
+        if (task) {
+          this.startFocus(task.id);
+        }
+      });
+    }
 
     this.activeListEl.appendChild(inputItem);
 
@@ -1167,19 +1201,6 @@ class TodoXApp {
     const actions = document.createElement('div');
     actions.className = 'todox-actions';
 
-    const focusButton = document.createElement('button');
-    focusButton.className = 'todox-action-button todox-action-button--focus';
-    focusButton.type = 'button';
-    focusButton.textContent = this.activeTaskId === task.id ? '⏸' : '▶︎';
-    focusButton.title = this.activeTaskId === task.id ? '一時停止' : 'フォーカス開始';
-    focusButton.addEventListener('click', () => {
-      if (this.activeTaskId === task.id) {
-        this.stopFocus();
-      } else {
-        this.startFocus(task.id);
-      }
-    });
-
     const shareButton = document.createElement('button');
     shareButton.className = 'todox-action-button todox-action-button--share';
     shareButton.type = 'button';
@@ -1197,7 +1218,21 @@ class TodoXApp {
       this.deleteTask(task.id);
     });
 
-    actions.appendChild(focusButton);
+    if (FOCUS_FEATURE_ENABLED) {
+      const focusButton = document.createElement('button');
+      focusButton.className = 'todox-action-button todox-action-button--focus';
+      focusButton.type = 'button';
+      focusButton.textContent = this.activeTaskId === task.id ? '⏸' : '▶︎';
+      focusButton.title = this.activeTaskId === task.id ? '一時停止' : 'フォーカス開始';
+      focusButton.addEventListener('click', () => {
+        if (this.activeTaskId === task.id) {
+          this.stopFocus();
+        } else {
+          this.startFocus(task.id);
+        }
+      });
+      actions.appendChild(focusButton);
+    }
     actions.appendChild(shareButton);
     actions.appendChild(deleteButton);
 
@@ -1278,12 +1313,16 @@ class TodoXApp {
       ? activeCount
       : this.tasks.filter((task) => !task.completed).length;
     const total = activeTotal + completed;
-    const activeTask = this.activeTaskId
-      ? this.tasks.find((task) => task.id === this.activeTaskId)
-      : undefined;
-    const focusText = activeTask ? `フォーカス中: ${activeTask.text}` : 'フォーカス待ち';
     const remainingText = activeTotal > 0 ? `残り ${activeTotal} 件` : '全タスク完了！';
-    this.progressEl.textContent = `完了 ${completed}/${total} ・ ${remainingText} ・ ${focusText}`;
+    const parts = [`完了 ${completed}/${total}`, remainingText];
+    if (FOCUS_FEATURE_ENABLED) {
+      const activeTask = this.activeTaskId
+        ? this.tasks.find((task) => task.id === this.activeTaskId)
+        : undefined;
+      const focusText = activeTask ? `フォーカス中: ${activeTask.text}` : 'フォーカス待ち';
+      parts.push(focusText);
+    }
+    this.progressEl.textContent = parts.join(' ・ ');
   }
 
   handleNewTaskSubmit() {
@@ -1383,6 +1422,9 @@ class TodoXApp {
   }
 
   startFocus(taskId) {
+    if (!FOCUS_FEATURE_ENABLED) {
+      return;
+    }
     const task = this.tasks.find((t) => t.id === taskId);
     if (!task || task.completed) {
       return;
@@ -1401,6 +1443,9 @@ class TodoXApp {
   }
 
   stopFocus() {
+    if (!FOCUS_FEATURE_ENABLED) {
+      return;
+    }
     if (!this.activeTaskId) {
       return;
     }
