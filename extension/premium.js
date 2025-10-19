@@ -2,6 +2,7 @@
   const CONFIG = Object.assign(
     {
       licensePublicKeyBase64: "",
+      licenseRedeemUrl: "",
       sponsorsUrl: typeof chrome !== "undefined" && chrome.runtime?.getURL
         ? chrome.runtime.getURL("sponsors.json")
         : "sponsors.json",
@@ -22,6 +23,24 @@
     focusBgm: "focus_bgm",
     analytics: "local_analytics",
   };
+
+  async function safeExtractError(response) {
+    try {
+      const data = await response.clone().json();
+      if (data && typeof data.error === "string") {
+        if (data.hint) {
+          return `${data.error} (${data.hint})`;
+        }
+        return data.error;
+      }
+    } catch (error) {
+      // ignore parsing issues
+    }
+    if (response && typeof response.status === "number") {
+      return `サーバーエラー (HTTP ${response.status})`;
+    }
+    return "コードの検証に失敗しました";
+  }
 
   class PremiumManager {
     constructor() {
@@ -139,12 +158,48 @@
       return CONFIG.sponsorsUrl;
     }
 
-    async redeem(code) {
+    async redeem(rawCode) {
+      const code = typeof rawCode === "string" ? rawCode.trim() : "";
+      if (!code) {
+        return { ok: false, error: "コードを入力してください" };
+      }
+      this.status = "verifying";
+      this.emit();
+      let token = code;
+      if (CONFIG.licenseRedeemUrl) {
+        try {
+          const response = await fetch(CONFIG.licenseRedeemUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code }),
+            credentials: "omit",
+          });
+          if (!response.ok) {
+            const hint = await safeExtractError(response);
+            throw new Error(hint || "コードの検証に失敗しました");
+          }
+          const data = await response.json();
+          if (!data || typeof data.licenseToken !== "string") {
+            throw new Error("無効なライセンス応答です");
+          }
+          token = data.licenseToken;
+        } catch (error) {
+          this.status = "idle";
+          this.emit();
+          const message =
+            error && typeof error.message === "string"
+              ? error.message === "Failed to fetch"
+                ? "サーバーに接続できませんでした"
+                : error.message
+              : "コードの検証に失敗しました";
+          return { ok: false, error: message, originalError: error };
+        }
+      }
       try {
-        const payload = await this.applyLicense(code);
+        const payload = await this.applyLicense(token);
         return { ok: true, payload };
       } catch (error) {
-        this.status = 'idle';
+        this.status = "idle";
         this.emit();
         let message = "コードの検証に失敗しました";
         if (error && error.code === "EXPIRED") {

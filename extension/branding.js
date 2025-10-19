@@ -8,6 +8,8 @@
   const DEFAULT_CONFIG = {
     licensePublicKeyBase64:
       (typeof window !== "undefined" && window.TODOX_CONFIG?.licensePublicKeyBase64) || "",
+    licenseRedeemUrl:
+      (typeof window !== "undefined" && window.TODOX_CONFIG?.licenseRedeemUrl) || "",
     sponsorsUrl:
       (typeof window !== "undefined" && window.TODOX_CONFIG?.sponsorsUrl) ||
       (typeof chrome !== "undefined" && chrome.runtime?.getURL

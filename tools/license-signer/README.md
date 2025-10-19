@@ -48,6 +48,7 @@ Verification checks the Ed25519 signature and reports if the license is expired 
 - `LICENSE_PRIVATE_KEY_PATH` should point to the private key file (never commit it).
 - `LICENSE_PUBLIC_KEY_BASE64` must be exposed to the client bundle for verification.
 - `SPONSORS_URL` controls where the extension fetches sponsor inventory (can be a CDN or the bundled `sponsors.json`).
+- `LICENSE_REDEEM_URL` (optional) enables server-side redemption; the client POSTs codes and expects `{ "licenseToken": "..." }`.
 
 ## Security Notes
 
