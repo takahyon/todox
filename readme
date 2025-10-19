@@ -25,6 +25,37 @@
 - サイドバー上部に固定表示され、URL が切り替わってもハートビート監視で継続表示されます。
 - 空のときは気づきやすいプレースホルダーを表示。
 
+## TodoX+ (プレミアムコード)
+
+設定ドロワーから「TodoX+ コード」を入力すると、署名付きライセンスを検証して次の機能が解放されます。
+
+- 🎨 テーマ切り替え (Dark / Cafe / Sepia)
+- 🎧 フォーカス BGM (カフェ / ホワイトノイズ)
+- 📈 ローカル分析 (フォーカス時間の集計チャート)
+
+ライセンスは Ed25519 署名で検証され、クライアントには公開鍵のみが埋め込まれています。署名済みトークンは `<payload>.<signature>` 形式で保存され、検証に失敗した場合は自動的に無効化されます。
+
+ライセンスの署名や公開鍵の生成は `tools/license-signer` にある CLI で行えます。
+
+```
+cd tools/license-signer
+npm install
+npx todox-license generate --out-private ../secrets/license_ed25519.key --out-public ../secrets/license_public.key
+npx todox-license sign --key ../secrets/license_ed25519.key --features themes,focus_bgm,local_analytics
+```
+
+生成した公開鍵は `.env` 経由で `LICENSE_PUBLIC_KEY_BASE64` に設定し、クライアントに埋め込みます。秘密鍵ファイル (`secrets/` 配下) は必ず `.gitignore` によって除外してください。
+
+## スポンサーラインと設定
+
+- フォーカス開始時に 1 行のスポンサーリンクを表示します (TodoX+ 有効時は非表示)。
+- `SPONSORS_URL` で指定した JSON を取得し、重み付き乱数で選択します。開発中は `extension/sponsors.json` がフォールバックとして読み込まれます。
+- `frequencyCap` の設定に従って、セッションおよび日次での表示回数を制限します。×ボタンで閉じた場合はそのセッションでは再表示されません。
+- 設定ドロワーから TodoX+ コードの入力、テーマ / BGM の切り替え、匿名診断情報の送信許可が行えます。
+- DoneX セクションは折りたたみ可能になり、「✨ 昇華」ボタンで完了タスクをアーカイブするとミニアニメーションを表示します。
+
+匿名診断 (オプトイン) を有効にすると、フォーカスの開始・終了やタスク完了時に最小限の統計が `navigator.sendBeacon` で送信されます。デフォルトでは無効です。
+
 ## 使い方
 
 1. このリポジトリをクローンします。
@@ -39,6 +70,15 @@
 - `extension/contentScript.js` — サイドバーの調整と TODO リストの実装。
 - `extension/contentStyles.css` — TODO リストと折りたたみ UI のスタイル。
 - `extension/completed.html` / `extension/completed.js` / `extension/completed.css` — 完了タスク履歴ページとエクスポート UI。
+
+## 開発メモ
+
+- `.env.example` を参照して `LICENSE_PUBLIC_KEY_BASE64` や `SPONSORS_URL` を設定できます。
+- テストは Node.js 標準の `node --test` で実行します。
+
+```
+npm test
+```
 
 ## 今後の拡張案
 

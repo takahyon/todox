@@ -7,7 +7,14 @@
   "content_scripts": [
     {
       "matches": ["https://x.com/*", "https://twitter.com/*"],
-      "js": ["branding.js", "contentScript.js"],
+      "js": [
+        "lib/verifyLicense.js",
+        "lib/sponsorLogic.js",
+        "branding.js",
+        "premium.js",
+        "sponsors.js",
+        "contentScript.js"
+      ],
       "css": ["contentStyles.css"],
       "run_at": "document_idle"
     }
