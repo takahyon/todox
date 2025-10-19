@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TodoX Sidebar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Collapse default sidebar modules on X.com and replace them with a lightweight TODO list.",
   "permissions": ["storage"],
   "content_scripts": [
