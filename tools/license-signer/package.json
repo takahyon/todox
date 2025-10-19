@@ -1,0 +1,13 @@
+{
+  "name": "todox-license-signer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "todox-license": "./signer.mjs"
+  },
+  "dependencies": {
+    "tweetnacl": "^1.0.3",
+    "yargs": "^17.7.2"
+  }
+}

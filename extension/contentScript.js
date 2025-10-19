@@ -16,6 +16,153 @@ const LOCATION_POLL_INTERVAL_MS = 1000;
 const TIMER_TICK_MS = 1000;
 const SHOOT_ANIMATION_DURATION_MS = 600;
 
+const PREMIUM_FEATURE_MAP =
+  typeof window !== "undefined" && window.TODOX_PREMIUM_FEATURES
+    ? window.TODOX_PREMIUM_FEATURES
+    : { themes: "themes", focusBgm: "focus_bgm", analytics: "local_analytics" };
+
+class FocusBgmController {
+  constructor() {
+    this.audioContext = null;
+    this.currentTrack = "none";
+    this.active = false;
+    this.source = null;
+    this.buffers = {};
+  }
+
+  async ensureContext() {
+    if (this.audioContext) {
+      return this.audioContext;
+    }
+    const Context = typeof window !== "undefined" ? window.AudioContext || window.webkitAudioContext : null;
+    if (!Context) {
+      return null;
+    }
+    this.audioContext = new Context();
+    return this.audioContext;
+  }
+
+  async update(track, shouldBeActive) {
+    this.currentTrack = track || "none";
+    this.active = shouldBeActive;
+    if (!this.active || !this.currentTrack || this.currentTrack === "none") {
+      this.stop();
+      return;
+    }
+    const ctx = await this.ensureContext();
+    if (!ctx) {
+      return;
+    }
+    if (typeof ctx.resume === "function") {
+      try {
+        await ctx.resume();
+      } catch (error) {
+        // ignore resume errors
+      }
+    }
+    this.stop();
+    const buffer = await this.getBuffer(ctx, this.currentTrack);
+    if (!buffer) {
+      return;
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(ctx.destination);
+    try {
+      source.start();
+      this.source = source;
+    } catch (error) {
+      // ignore start errors
+    }
+  }
+
+  stop() {
+    if (this.source) {
+      try {
+        this.source.stop();
+      } catch (error) {
+        // ignore stop errors
+      }
+      try {
+        this.source.disconnect();
+      } catch (error) {
+        // ignore disconnect errors
+      }
+      this.source = null;
+    }
+  }
+
+  async getBuffer(ctx, track) {
+    if (this.buffers[track]) {
+      return this.buffers[track];
+    }
+    const duration = track === "cafe" ? 8 : 4;
+    const buffer = ctx.createBuffer(1, Math.max(1, ctx.sampleRate * duration), ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    if (track === "cafe") {
+      let lastValue = 0;
+      for (let i = 0; i < data.length; i += 1) {
+        const white = Math.random() * 2 - 1;
+        lastValue = (lastValue + 0.02 * white) / 1.02;
+        data[i] = Math.max(-1, Math.min(1, lastValue)) * 0.3;
+      }
+    } else if (track === "white") {
+      for (let i = 0; i < data.length; i += 1) {
+        data[i] = (Math.random() * 2 - 1) * 0.2;
+      }
+    } else {
+      return null;
+    }
+    this.buffers[track] = buffer;
+    return buffer;
+  }
+}
+
+function computeFocusAnalytics(history, now = Date.now()) {
+  const summary = {
+    todayMs: 0,
+    weekMs: 0,
+    totalMs: 0,
+  };
+  if (!Array.isArray(history) || history.length === 0) {
+    return summary;
+  }
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const startOfToday = today.getTime();
+  const startOfWeekDate = new Date(startOfToday);
+  startOfWeekDate.setDate(startOfWeekDate.getDate() - 6);
+  const startOfWeek = startOfWeekDate.getTime();
+
+  history.forEach((entry) => {
+    const completedAt = typeof entry?.completedAt === "number" ? entry.completedAt : 0;
+    const elapsedMs = typeof entry?.elapsedMs === "number" ? entry.elapsedMs : 0;
+    summary.totalMs += elapsedMs;
+    if (completedAt >= startOfToday) {
+      summary.todayMs += elapsedMs;
+    }
+    if (completedAt >= startOfWeek) {
+      summary.weekMs += elapsedMs;
+    }
+  });
+
+  return summary;
+}
+
+function formatMinutesFromMs(ms) {
+  const totalMinutes = Math.floor(ms / 60000);
+  if (totalMinutes <= 0) {
+    return "0分";
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0) {
+    return `${hours}時間${minutes}分`;
+  }
+  return `${minutes}分`;
+}
+
 const BRANDING =
   typeof window !== "undefined" && window.TODOX_BRANDING
     ? window.TODOX_BRANDING
@@ -218,6 +365,8 @@ class TodoXApp {
     this.completedListEl = null;
     this.completedEmptyEl = null;
     this.completedMoreEl = null;
+    this.completedContainer = null;
+    this.completedCelebrationEl = null;
     this.progressEl = null;
     this.newTaskInput = null;
     this.isComposing = false;
@@ -227,11 +376,58 @@ class TodoXApp {
     this.activeTaskId = null;
     this.sidebarObserver = null;
     this.detachStorageListener = null;
+    this.detachPremiumListener = null;
     this.lastLocation = location.href;
     this.cleanupRegistered = false;
+    this.focusSponsorEl = null;
+    this.focusSponsorLink = null;
+    this.focusSponsorDismissButton = null;
+    this.settingsDetails = null;
+    this.redeemInput = null;
+    this.redeemStatusEl = null;
+    this.redeemMessageEl = null;
+    this.themeSelect = null;
+    this.bgmSelect = null;
+    this.analyticsSection = null;
+    this.analyticsValues = {
+      today: null,
+      week: null,
+      average: null,
+    };
+    this.telemetryToggle = null;
+    this.archiveButton = null;
+    this.bgmController = new FocusBgmController();
+    this.pendingSponsorRequest = null;
+    this.premium = typeof window !== "undefined" ? window.TODOX_PREMIUM : null;
+    this.sponsorsManager =
+      typeof window !== "undefined" && window.TodoxSponsorsManager
+        ? new window.TodoxSponsorsManager({ premiumManager: this.premium })
+        : null;
   }
 
   async start() {
+    if (this.premium && typeof this.premium.init === 'function') {
+      try {
+        await this.premium.init();
+      } catch (error) {
+        console.error('TodoX failed to initialise premium manager', error);
+      }
+      if (typeof this.premium.onChange === 'function' && !this.detachPremiumListener) {
+        this.detachPremiumListener = this.premium.onChange(() => {
+          this.updatePremiumUI();
+          this.refreshSponsorBanner();
+          this.updateFocusAudio();
+        });
+      }
+    }
+    if (this.sponsorsManager && typeof this.sponsorsManager.init === 'function') {
+      try {
+        await this.sponsorsManager.init();
+      } catch (error) {
+        console.warn('TodoX failed to load sponsors configuration', error);
+      }
+    }
+
     const { tasks, history } = await this.storage.load();
     this.tasks = tasks;
     this.history = history;
@@ -274,6 +470,10 @@ class TodoXApp {
         this.locationInterval = null;
       }
       this.stopTimer();
+      if (this.detachPremiumListener) {
+        this.detachPremiumListener();
+        this.detachPremiumListener = null;
+      }
       if (this.detachStorageListener) {
         this.detachStorageListener();
         this.detachStorageListener = null;
@@ -309,6 +509,7 @@ class TodoXApp {
     this.collapseSections(sidebar);
     this.ensurePanel(sidebar);
     this.render();
+    this.updatePremiumUI();
     this.startHeartbeat();
   }
 
@@ -365,17 +566,91 @@ class TodoXApp {
         </div>
         <p class="todox-panel__progress" aria-live="polite"></p>
         <p class="todox-panel__hint">Enter でタスク追加、⌘⏎ で即時フォーカス</p>
+        <div class="todox-focus-sponsor" hidden>
+          <span class="todox-focus-sponsor__badge" aria-hidden="true">💖</span>
+          <a class="todox-focus-sponsor__link" target="_blank" rel="noopener noreferrer"></a>
+          <button class="todox-focus-sponsor__dismiss" type="button" aria-label="スポンサーを閉じる">×</button>
+        </div>
       </header>
       <ul class="todox-list todox-list--active"></ul>
       <section class="todox-done" aria-live="polite">
-        <div class="todox-done__header">
-          <h3 class="todox-done__title">DoneX</h3>
-          <span class="todox-done__subtitle">今日のがんばり</span>
-        </div>
-        <p class="todox-done__empty" hidden>まだ完了したタスクはありません。</p>
-        <ul class="todox-done__list"></ul>
-        <p class="todox-done__more" hidden></p>
+        <details class="todox-done__details" open>
+          <summary class="todox-done__summary">
+            <div class="todox-done__header">
+              <h3 class="todox-done__title">DoneX</h3>
+              <span class="todox-done__subtitle">今日のがんばり</span>
+              <button class="todox-done__archive" type="button">✨ 昇華</button>
+            </div>
+          </summary>
+          <div class="todox-done__content">
+            <p class="todox-done__empty" hidden>まだ完了したタスクはありません。</p>
+            <ul class="todox-done__list"></ul>
+            <p class="todox-done__more" hidden></p>
+            <div class="todox-done__celebration" aria-hidden="true"></div>
+          </div>
+        </details>
       </section>
+      <details class="todox-settings">
+        <summary class="todox-settings__summary" aria-label="設定を開く">
+          <span>⚙️ 設定</span>
+        </summary>
+        <div class="todox-settings__content">
+          <section class="todox-settings__section todox-settings__section--premium">
+            <h3 class="todox-settings__heading">TodoX+ プレミアム</h3>
+            <p class="todox-settings__status">未アンロック</p>
+            <form class="todox-redeem-form">
+              <label class="todox-redeem-form__label">
+                <span class="todox-redeem-form__text">🎁 コードを入力</span>
+                <input class="todox-redeem-form__input" type="text" name="code" autocomplete="off" placeholder="例: XXXX.YYYY" aria-label="TodoX+ コード" />
+              </label>
+              <button class="todox-redeem-form__button" type="submit">Redeem</button>
+            </form>
+            <p class="todox-redeem-form__message" aria-live="polite"></p>
+          </section>
+          <section class="todox-settings__section todox-settings__section--theme">
+            <h3 class="todox-settings__heading">🎨 テーマ</h3>
+            <select class="todox-theme-select" aria-label="テーマを選択">
+              <option value="default">Standard</option>
+              <option value="dark">Dark</option>
+              <option value="cafe">Cafe</option>
+              <option value="sepia">Sepia</option>
+            </select>
+            <p class="todox-settings__helper">プレミアムでテーマを変更できます。</p>
+          </section>
+          <section class="todox-settings__section todox-settings__section--bgm">
+            <h3 class="todox-settings__heading">🎧 フォーカスBGM</h3>
+            <select class="todox-bgm-select" aria-label="フォーカスBGMを選択">
+              <option value="none">BGMなし</option>
+              <option value="cafe">Cafe ambience</option>
+              <option value="white">White noise</option>
+            </select>
+            <p class="todox-settings__helper">フォーカス開始時に再生します。</p>
+          </section>
+          <section class="todox-settings__section todox-settings__section--analytics" hidden>
+            <h3 class="todox-settings__heading">📈 フォーカス分析</h3>
+            <dl class="todox-analytics">
+              <div class="todox-analytics__row">
+                <dt>今日</dt>
+                <dd class="todox-analytics__value todox-analytics__value--today">-</dd>
+              </div>
+              <div class="todox-analytics__row">
+                <dt>今週</dt>
+                <dd class="todox-analytics__value todox-analytics__value--week">-</dd>
+              </div>
+              <div class="todox-analytics__row">
+                <dt>平均/日</dt>
+                <dd class="todox-analytics__value todox-analytics__value--average">-</dd>
+              </div>
+            </dl>
+          </section>
+          <section class="todox-settings__section todox-settings__section--telemetry">
+            <label class="todox-telemetry-toggle">
+              <input type="checkbox" class="todox-telemetry-toggle__input" />
+              <span>匿名の利用状況を共有して品質向上に協力する (任意)</span>
+            </label>
+          </section>
+        </div>
+      </details>
       <footer class="todox-panel__footer">
         <p class="todox-panel__credit">
           developed by <a class="todox-panel__credit-link" target="_blank" rel="noopener noreferrer"></a>
@@ -385,13 +660,55 @@ class TodoXApp {
     `;
 
     this.activeListEl = container.querySelector('.todox-list--active');
-    this.completedSection = container.querySelector('.todox-done');
+    this.completedContainer = container.querySelector('.todox-done');
+    this.completedSection = container.querySelector('.todox-done__details');
     this.completedListEl = container.querySelector('.todox-done__list');
     this.completedEmptyEl = container.querySelector('.todox-done__empty');
     this.completedMoreEl = container.querySelector('.todox-done__more');
+    this.completedCelebrationEl = container.querySelector('.todox-done__celebration');
     this.progressEl = container.querySelector('.todox-panel__progress');
+    this.focusSponsorEl = container.querySelector('.todox-focus-sponsor');
+    this.focusSponsorLink = container.querySelector('.todox-focus-sponsor__link');
+    this.focusSponsorDismissButton = container.querySelector('.todox-focus-sponsor__dismiss');
+    this.settingsDetails = container.querySelector('.todox-settings');
+    this.redeemInput = container.querySelector('.todox-redeem-form__input');
+    this.redeemStatusEl = container.querySelector('.todox-settings__status');
+    this.redeemMessageEl = container.querySelector('.todox-redeem-form__message');
+    this.themeSelect = container.querySelector('.todox-theme-select');
+    this.bgmSelect = container.querySelector('.todox-bgm-select');
+    this.analyticsSection = container.querySelector('.todox-settings__section--analytics');
+    this.analyticsValues = {
+      today: container.querySelector('.todox-analytics__value--today'),
+      week: container.querySelector('.todox-analytics__value--week'),
+      average: container.querySelector('.todox-analytics__value--average'),
+    };
+    this.telemetryToggle = container.querySelector('.todox-telemetry-toggle__input');
+    this.archiveButton = container.querySelector('.todox-done__archive');
     const historyButton = container.querySelector('.todox-history-button');
     historyButton?.addEventListener('click', () => this.openHistory());
+    this.focusSponsorDismissButton?.addEventListener('click', () => {
+      if (this.sponsorsManager && typeof this.sponsorsManager.dismissCurrentSponsor === 'function') {
+        this.sponsorsManager.dismissCurrentSponsor();
+      }
+      this.hideSponsorBanner();
+    });
+    const redeemForm = container.querySelector('.todox-redeem-form');
+    redeemForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.handleRedeemSubmit();
+    });
+    this.themeSelect?.addEventListener('change', () => {
+      this.handleThemeChange();
+    });
+    this.bgmSelect?.addEventListener('change', () => {
+      this.handleBgmChange();
+    });
+    this.telemetryToggle?.addEventListener('change', () => {
+      this.handleTelemetryToggle();
+    });
+    this.archiveButton?.addEventListener('click', () => {
+      this.archiveCompletedTasks();
+    });
 
     const creditLink = container.querySelector('.todox-panel__credit-link');
     if (creditLink) {
@@ -405,6 +722,259 @@ class TodoXApp {
     }
 
     return container;
+  }
+
+  canUseThemeFeature() {
+    return Boolean(this.premium?.hasFeature?.(PREMIUM_FEATURE_MAP.themes));
+  }
+
+  canUseBgmFeature() {
+    return Boolean(this.premium?.hasFeature?.(PREMIUM_FEATURE_MAP.focusBgm));
+  }
+
+  canUseAnalyticsFeature() {
+    return Boolean(this.premium?.hasFeature?.(PREMIUM_FEATURE_MAP.analytics));
+  }
+
+  async handleRedeemSubmit() {
+    const code = this.redeemInput?.value.trim();
+    if (!code) {
+      this.setRedeemMessage('コードを入力してください', 'info');
+      return;
+    }
+    this.setRedeemMessage('検証中…', 'info');
+    const result = await this.premium?.redeem?.(code);
+    if (result?.ok) {
+      this.redeemInput.value = '';
+      this.setRedeemMessage('TodoX+ がアンロックされました 🎉', 'success');
+      this.updatePremiumUI();
+    } else {
+      this.setRedeemMessage(result?.error || 'コードの検証に失敗しました', 'error');
+    }
+  }
+
+  setRedeemMessage(message, tone) {
+    if (!this.redeemMessageEl) {
+      return;
+    }
+    this.redeemMessageEl.textContent = message;
+    this.redeemMessageEl.dataset.todoxTone = tone || '';
+  }
+
+  handleThemeChange() {
+    if (!this.themeSelect) {
+      return;
+    }
+    const value = this.themeSelect.value;
+    if (!this.canUseThemeFeature()) {
+      this.themeSelect.value = this.getActiveTheme();
+      this.setRedeemMessage('テーマ変更は TodoX+ で利用できます', 'info');
+      return;
+    }
+    this.premium?.setSelectedTheme?.(value);
+    this.applyTheme(value);
+  }
+
+  handleBgmChange() {
+    if (!this.bgmSelect) {
+      return;
+    }
+    const value = this.bgmSelect.value;
+    if (!this.canUseBgmFeature()) {
+      this.bgmSelect.value = this.getSelectedBgm();
+      this.setRedeemMessage('フォーカスBGMは TodoX+ で利用できます', 'info');
+      return;
+    }
+    this.premium?.setSelectedBgm?.(value);
+    this.updateFocusAudio();
+  }
+
+  handleTelemetryToggle() {
+    if (!this.telemetryToggle) {
+      return;
+    }
+    const enabled = this.telemetryToggle.checked;
+    this.premium?.setTelemetryEnabled?.(enabled);
+    this.setRedeemMessage(enabled ? '匿名診断の共有にご協力ありがとうございます！' : '匿名診断の共有をオフにしました', 'info');
+  }
+
+  getActiveTheme() {
+    if (this.canUseThemeFeature()) {
+      return this.premium?.getSelectedTheme?.() || 'default';
+    }
+    return 'default';
+  }
+
+  getSelectedBgm() {
+    if (this.canUseBgmFeature()) {
+      return this.premium?.getSelectedBgm?.() || 'none';
+    }
+    return 'none';
+  }
+
+  applyTheme(theme) {
+    if (!this.panel) {
+      return;
+    }
+    const themes = ['default', 'dark', 'cafe', 'sepia'];
+    this.panel.classList.remove('todox-theme--dark', 'todox-theme--cafe', 'todox-theme--sepia');
+    if (theme && theme !== 'default' && themes.includes(theme)) {
+      this.panel.classList.add(`todox-theme--${theme}`);
+    }
+  }
+
+  updatePremiumUI() {
+    const isActive = this.premium?.isActive?.() || false;
+    const payload = this.premium?.getLicensePayload?.() || null;
+    const status = this.premium?.getStatus?.();
+    if (this.redeemStatusEl) {
+      const expiresAt = payload?.exp ? new Date(payload.exp * 1000) : null;
+      let statusText = '未アンロック';
+      if (isActive) {
+        statusText = `TodoX+ 有効中 (〜${expiresAt ? expiresAt.toLocaleDateString() : '無期限'})`;
+      } else if (status === 'verifying') {
+        statusText = 'コードを検証中…';
+      }
+      this.redeemStatusEl.textContent = statusText;
+      this.redeemStatusEl.classList.toggle('todox-settings__status--active', isActive);
+    }
+    if (this.themeSelect) {
+      const theme = this.getActiveTheme();
+      this.themeSelect.value = theme;
+      this.themeSelect.disabled = !this.canUseThemeFeature();
+    }
+    if (this.bgmSelect) {
+      const bgm = this.getSelectedBgm();
+      this.bgmSelect.value = bgm;
+      this.bgmSelect.disabled = !this.canUseBgmFeature();
+    }
+    if (this.analyticsSection) {
+      this.analyticsSection.hidden = !this.canUseAnalyticsFeature();
+    }
+    if (this.telemetryToggle) {
+      const enabled = this.premium?.isTelemetryEnabled?.() || false;
+      this.telemetryToggle.checked = enabled;
+    }
+    this.applyTheme(this.getActiveTheme());
+    this.updateAnalytics();
+    this.updateFocusAudio();
+    this.refreshSponsorBanner();
+  }
+
+  async updateFocusAudio() {
+    const track = this.getSelectedBgm();
+    const shouldPlay = this.canUseBgmFeature() && Boolean(this.activeTaskId);
+    await this.bgmController.update(track, shouldPlay);
+  }
+
+  hideSponsorBanner() {
+    if (!this.focusSponsorEl) {
+      return;
+    }
+    this.focusSponsorEl.hidden = true;
+    if (this.focusSponsorLink) {
+      this.focusSponsorLink.textContent = '';
+      this.focusSponsorLink.removeAttribute('href');
+    }
+  }
+
+  async refreshSponsorBanner() {
+    if (!this.focusSponsorEl) {
+      return;
+    }
+    if (!this.activeTaskId || this.premium?.isActive?.()) {
+      this.hideSponsorBanner();
+      return;
+    }
+    const requestId = Symbol('sponsor');
+    this.pendingSponsorRequest = requestId;
+    try {
+      const sponsor = await this.sponsorsManager?.selectSponsor?.();
+      if (this.pendingSponsorRequest !== requestId) {
+        return;
+      }
+      if (!sponsor || !sponsor.label || !sponsor.url) {
+        this.hideSponsorBanner();
+        return;
+      }
+      if (this.focusSponsorLink) {
+        this.focusSponsorLink.textContent = sponsor.label;
+        this.focusSponsorLink.href = sponsor.url;
+      }
+      this.focusSponsorEl.hidden = false;
+    } catch (error) {
+      this.hideSponsorBanner();
+    }
+  }
+
+  archiveCompletedTasks() {
+    const completedTasks = this.tasks.filter((task) => task.completed);
+    if (completedTasks.length === 0) {
+      this.triggerArchiveCelebration('完了タスクはありません');
+      return;
+    }
+    this.tasks = this.tasks.filter((task) => !task.completed);
+    this.render();
+    this.persist();
+    this.triggerArchiveCelebration('DoneX を昇華しました ✨');
+  }
+
+  triggerArchiveCelebration(message) {
+    if (!this.completedCelebrationEl) {
+      return;
+    }
+    this.completedCelebrationEl.textContent = message;
+    this.completedCelebrationEl.classList.add('todox-done__celebration--active');
+    setTimeout(() => {
+      this.completedCelebrationEl?.classList.remove('todox-done__celebration--active');
+    }, 1200);
+  }
+
+  updateAnalytics() {
+    if (!this.analyticsSection || this.analyticsSection.hidden) {
+      return;
+    }
+    const summary = computeFocusAnalytics(this.history);
+    const average = summary.weekMs > 0 ? summary.weekMs / 7 : 0;
+    if (this.analyticsValues.today) {
+      this.analyticsValues.today.textContent = formatMinutesFromMs(summary.todayMs);
+    }
+    if (this.analyticsValues.week) {
+      this.analyticsValues.week.textContent = formatMinutesFromMs(summary.weekMs);
+    }
+    if (this.analyticsValues.average) {
+      this.analyticsValues.average.textContent = formatMinutesFromMs(average);
+    }
+  }
+
+  maybeSendDiagnostics(event, data) {
+    if (!this.premium?.isTelemetryEnabled?.()) {
+      return;
+    }
+    const url = this.premium?.getDiagnosticsUrl?.();
+    if (!url) {
+      return;
+    }
+    const payload = {
+      event,
+      ...data,
+    };
+    try {
+      const body = JSON.stringify(payload);
+      if (navigator.sendBeacon) {
+        const blob = new Blob([body], { type: 'application/json' });
+        navigator.sendBeacon(url, blob);
+      } else {
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } catch (error) {
+      // ignore diagnostics errors
+    }
   }
 
   startHeartbeat() {
@@ -449,6 +1019,7 @@ class TodoXApp {
     this.renderActiveTasks(activeTasks);
     this.renderCompletedTasks(completedTasks);
     this.updateProgress(activeTasks.length, completedTasks.length);
+    this.updateAnalytics();
   }
 
   renderActiveTasks(activeTasks) {
@@ -527,7 +1098,7 @@ class TodoXApp {
   }
 
   renderCompletedTasks(completedTasks) {
-    if (!this.completedListEl || !this.completedEmptyEl || !this.completedSection) {
+    if (!this.completedListEl || !this.completedEmptyEl) {
       return;
     }
 
@@ -535,7 +1106,8 @@ class TodoXApp {
 
     if (completedTasks.length === 0) {
       this.completedEmptyEl.hidden = false;
-      this.completedSection.classList.add('todox-done--empty');
+      this.completedSection?.classList.add('todox-done--empty');
+      this.completedContainer?.classList.add('todox-done--empty');
       if (this.completedMoreEl) {
         this.completedMoreEl.hidden = true;
       }
@@ -543,7 +1115,8 @@ class TodoXApp {
     }
 
     this.completedEmptyEl.hidden = true;
-    this.completedSection.classList.remove('todox-done--empty');
+    this.completedSection?.classList.remove('todox-done--empty');
+    this.completedContainer?.classList.remove('todox-done--empty');
 
     const displayCompleted = completedTasks.slice(0, COMPLETED_DISPLAY_LIMIT);
     displayCompleted.forEach((task) => {
@@ -785,6 +1358,11 @@ class TodoXApp {
     this.history = this.history.slice(0, HISTORY_LIMIT);
     this.render();
     this.persist();
+    this.maybeSendDiagnostics('taskCompleted', {
+      taskId,
+      focusMs: task.elapsedMs,
+      totalCompleted: this.history.length,
+    });
   }
 
   uncompleteTask(taskId) {
@@ -817,6 +1395,9 @@ class TodoXApp {
     this.startTimer();
     this.render();
     this.persist();
+    this.updateFocusAudio();
+    this.refreshSponsorBanner();
+    this.maybeSendDiagnostics('focusStart', { taskId });
   }
 
   stopFocus() {
@@ -829,10 +1410,17 @@ class TodoXApp {
       task.elapsedMs += now - task.runningSince;
       task.runningSince = undefined;
     }
+    const finishedTaskId = this.activeTaskId;
     this.activeTaskId = null;
     this.stopTimer();
     this.render();
     this.persist();
+    this.updateFocusAudio();
+    this.refreshSponsorBanner();
+    this.maybeSendDiagnostics('focusStop', {
+      taskId: finishedTaskId,
+      focusMs: task ? task.elapsedMs : 0,
+    });
   }
 
   startTimer() {
@@ -866,7 +1454,7 @@ class TodoXApp {
 
   shareTask(task) {
     const focus = this.formatDuration(task.elapsedMs);
-    const message = `TodoX でタスク完了！\n${task.text}\n集中時間: ${focus}`;
+    const message = `TodoXでタスク昇華✨\n${task.text}\n集中時間: ${focus}\n#TodoX`;
     const url = `https://x.com/intent/tweet?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank', 'noopener');
   }

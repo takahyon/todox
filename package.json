@@ -1,0 +1,7 @@
+{
+  "name": "todox",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}
