@@ -56,6 +56,10 @@ npx todox-license sign --key ../secrets/license_ed25519.key --features themes,fo
 
 匿名診断 (オプトイン) を有効にすると、フォーカスの開始・終了やタスク完了時に最小限の統計が `navigator.sendBeacon` で送信されます。デフォルトでは無効です。
 
+## 既知の課題
+
+- フォーカスモード (Soft/Kichiku) は UI 崩れのため一時的に実装から除外しました。再設計の検討内容は `docs/issues/focus-mode.md` で追跡しています。
+
 ## 使い方
 
 1. このリポジトリをクローンします。
