@@ -579,6 +579,38 @@ class TodoXApp {
           <button class="todox-focus-sponsor__dismiss" type="button" aria-label="スポンサーを閉じる">×</button>
         </div>`
       : '';
+    const focusBgmSectionMarkup = FOCUS_FEATURE_ENABLED
+      ? `
+          <section class="todox-settings__section todox-settings__section--bgm">
+            <h3 class="todox-settings__heading">🎧 フォーカスBGM</h3>
+            <select class="todox-bgm-select" aria-label="フォーカスBGMを選択">
+              <option value="none">BGMなし</option>
+              <option value="cafe">Cafe ambience</option>
+              <option value="white">White noise</option>
+            </select>
+            <p class="todox-settings__helper">フォーカス開始時に再生します。</p>
+          </section>`
+      : '';
+    const analyticsSectionMarkup = FOCUS_FEATURE_ENABLED
+      ? `
+          <section class="todox-settings__section todox-settings__section--analytics" hidden>
+            <h3 class="todox-settings__heading">📈 フォーカス分析</h3>
+            <dl class="todox-analytics">
+              <div class="todox-analytics__row">
+                <dt>今日</dt>
+                <dd class="todox-analytics__value todox-analytics__value--today">-</dd>
+              </div>
+              <div class="todox-analytics__row">
+                <dt>今週</dt>
+                <dd class="todox-analytics__value todox-analytics__value--week">-</dd>
+              </div>
+              <div class="todox-analytics__row">
+                <dt>平均/日</dt>
+                <dd class="todox-analytics__value todox-analytics__value--average">-</dd>
+              </div>
+            </dl>
+          </section>`
+      : '';
 
     container.innerHTML = `
       <header class="todox-panel__header">
@@ -635,32 +667,8 @@ class TodoXApp {
             </select>
             <p class="todox-settings__helper">プレミアムでテーマを変更できます。</p>
           </section>
-          <section class="todox-settings__section todox-settings__section--bgm">
-            <h3 class="todox-settings__heading">🎧 フォーカスBGM</h3>
-            <select class="todox-bgm-select" aria-label="フォーカスBGMを選択">
-              <option value="none">BGMなし</option>
-              <option value="cafe">Cafe ambience</option>
-              <option value="white">White noise</option>
-            </select>
-            <p class="todox-settings__helper">フォーカス開始時に再生します。</p>
-          </section>
-          <section class="todox-settings__section todox-settings__section--analytics" hidden>
-            <h3 class="todox-settings__heading">📈 フォーカス分析</h3>
-            <dl class="todox-analytics">
-              <div class="todox-analytics__row">
-                <dt>今日</dt>
-                <dd class="todox-analytics__value todox-analytics__value--today">-</dd>
-              </div>
-              <div class="todox-analytics__row">
-                <dt>今週</dt>
-                <dd class="todox-analytics__value todox-analytics__value--week">-</dd>
-              </div>
-              <div class="todox-analytics__row">
-                <dt>平均/日</dt>
-                <dd class="todox-analytics__value todox-analytics__value--average">-</dd>
-              </div>
-            </dl>
-          </section>
+          ${focusBgmSectionMarkup}
+          ${analyticsSectionMarkup}
           <section class="todox-settings__section todox-settings__section--telemetry">
             <label class="todox-telemetry-toggle">
               <input type="checkbox" class="todox-telemetry-toggle__input" />
@@ -1193,10 +1201,12 @@ class TodoXApp {
     text.textContent = task.text;
     content.appendChild(text);
 
-    const timer = document.createElement('span');
-    timer.className = 'todox-task-timer';
-    timer.textContent = this.formatTimer(task);
-    content.appendChild(timer);
+    if (FOCUS_FEATURE_ENABLED) {
+      const timer = document.createElement('span');
+      timer.className = 'todox-task-timer';
+      timer.textContent = this.formatTimer(task);
+      content.appendChild(timer);
+    }
 
     const actions = document.createElement('div');
     actions.className = 'todox-actions';
@@ -1265,10 +1275,12 @@ class TodoXApp {
     text.textContent = task.text;
     content.appendChild(text);
 
-    const timer = document.createElement('span');
-    timer.className = 'todox-task-timer';
-    timer.textContent = `集中 ${this.formatTimer(task)}`;
-    content.appendChild(timer);
+    if (FOCUS_FEATURE_ENABLED) {
+      const timer = document.createElement('span');
+      timer.className = 'todox-task-timer';
+      timer.textContent = `集中 ${this.formatTimer(task)}`;
+      content.appendChild(timer);
+    }
 
     const actions = document.createElement('div');
     actions.className = 'todox-actions';
@@ -1499,7 +1511,9 @@ class TodoXApp {
 
   shareTask(task) {
     const focus = this.formatDuration(task.elapsedMs);
-    const message = `TodoXでタスク昇華✨\n${task.text}\n集中時間: ${focus}\n#TodoX`;
+    const message = FOCUS_FEATURE_ENABLED
+      ? `TodoXでタスク昇華✨\n${task.text}\n集中時間: ${focus}\n#TodoX`
+      : `TodoXでタスク昇華✨\n${task.text}\n#TodoX`;
     const url = `https://x.com/intent/tweet?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank', 'noopener');
   }
