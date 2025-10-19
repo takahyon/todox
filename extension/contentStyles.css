@@ -1,36 +1,88 @@
 .todox-panel {
-  background: rgba(15, 20, 25, 0.75);
-  backdrop-filter: blur(12px);
-  border-radius: 16px;
+  position: sticky;
+  top: 16px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   padding: 16px;
-  margin-bottom: 16px;
+  border-radius: 16px;
+  background: rgba(15, 20, 25, 0.78);
   color: #f7f9f9;
   font-family: "Helvetica Neue", Arial, sans-serif;
-  box-shadow: 0 8px 16px rgba(15, 20, 25, 0.2);
+  box-shadow: 0 12px 24px rgba(15, 20, 25, 0.25);
+  backdrop-filter: blur(12px);
 }
 
 .todox-panel__header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 16px;
+  gap: 8px;
+}
+
+.todox-panel__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .todox-panel__title {
+  margin: 0;
   font-size: 20px;
   font-weight: 700;
-  margin: 0;
 }
 
 .todox-panel__progress {
+  margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: rgba(247, 249, 249, 0.85);
+  color: rgba(247, 249, 249, 0.82);
 }
 
 .todox-panel__hint {
+  margin: 0;
   font-size: 12px;
-  color: rgba(247, 249, 249, 0.64);
+  color: rgba(247, 249, 249, 0.6);
+}
+
+.todox-panel__footer {
+  margin-top: 8px;
+  font-size: 11px;
+  color: rgba(247, 249, 249, 0.48);
+  text-align: right;
+}
+
+.todox-panel__footer a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.todox-panel__footer a:hover,
+.todox-panel__footer a:focus-visible {
+  text-decoration: underline;
+}
+
+.todox-history-button {
+  background: rgba(29, 155, 240, 0.18);
+  border: none;
+  color: inherit;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.todox-history-button:hover {
+  background: rgba(29, 155, 240, 0.28);
+  transform: translateY(-1px);
+}
+
+.todox-history-button:focus-visible {
+  outline: 2px solid rgba(29, 155, 240, 0.9);
+  outline-offset: 2px;
 }
 
 .todox-list {
@@ -39,44 +91,58 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .todox-list__item {
   display: grid;
   grid-template-columns: 32px 1fr auto;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 12px;
-  padding: 12px;
   gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  position: relative;
   transition: background 0.2s ease, transform 0.2s ease;
 }
 
 .todox-list__item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.09);
   transform: translateY(-1px);
 }
 
-.todox-list__item--completed {
-  opacity: 0.65;
-}
-
 .todox-list__item--new {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(29, 155, 240, 0.1);
 }
 
 .todox-list__item--empty {
   grid-template-columns: 1fr;
   justify-items: center;
   padding: 20px 12px;
-  color: rgba(247, 249, 249, 0.6);
+  color: rgba(247, 249, 249, 0.65);
   font-size: 14px;
 }
 
 .todox-empty-text::before {
   content: '✨';
   margin-right: 6px;
+}
+
+.todox-list__item--completed {
+  opacity: 0.7;
+}
+
+.todox-list__item--completed .todox-task-text {
+  text-decoration: line-through;
+  color: rgba(247, 249, 249, 0.55);
+}
+
+.todox-list__item--completed .todox-task-timer {
+  color: rgba(247, 249, 249, 0.4);
+}
+
+.todox-list__item--active {
+  box-shadow: 0 0 0 2px rgba(29, 155, 240, 0.4);
 }
 
 .todox-plus {
@@ -86,101 +152,50 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(29, 155, 240, 0.2);
-  color: #1d9bf0;
   font-size: 20px;
   font-weight: 700;
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(15, 20, 25, 0.9);
 }
 
 .todox-input {
   background: transparent;
   border: none;
-  color: inherit;
   outline: none;
+  color: inherit;
   font-size: 15px;
+  font-weight: 500;
 }
 
 .todox-input::placeholder {
-  color: rgba(247, 249, 249, 0.5);
+  color: rgba(247, 249, 249, 0.55);
 }
 
-.todox-circle-button {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 2px solid rgba(247, 249, 249, 0.4);
-  background: transparent;
-  position: relative;
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition: border 0.2s ease;
+.todox-input:disabled::placeholder {
+  color: rgba(247, 249, 249, 0.3);
 }
 
-.todox-circle-button:hover {
-  border-color: rgba(29, 155, 240, 0.8);
-}
-
-.todox-circle {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: rgba(29, 155, 240, 0.95);
-  transform: scale(0);
-  transition: transform 0.2s ease;
-}
-
-.todox-check {
-  position: absolute;
-  font-size: 14px;
-  color: #0f1419;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.todox-list__item--completed .todox-circle {
-  transform: scale(1);
-}
-
-.todox-list__item--completed .todox-check {
-  opacity: 1;
-}
-
-.todox-circle-button--pulse::after {
-  content: "";
-  position: absolute;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 2px solid rgba(29, 155, 240, 0.3);
-  animation: todox-pulse 0.4s ease;
-}
-
-@keyframes todox-pulse {
-  from {
-    transform: scale(0.6);
-    opacity: 0.9;
-  }
-  to {
-    transform: scale(1.4);
-    opacity: 0;
-  }
+.todox-task-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .todox-task-text {
+  margin: 0;
   font-size: 15px;
   line-height: 1.4;
-  word-break: break-word;
 }
 
-.todox-list__item--completed .todox-task-text {
-  text-decoration: line-through;
-  color: rgba(247, 249, 249, 0.6);
+.todox-task-timer {
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  color: rgba(247, 249, 249, 0.7);
 }
 
 .todox-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .todox-action-button {
@@ -190,53 +205,105 @@
   color: inherit;
   width: 28px;
   height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   transition: background 0.2s ease;
 }
 
 .todox-action-button:hover {
+  background: rgba(29, 155, 240, 0.32);
+}
+
+.todox-action-button:focus-visible {
+  outline: 2px solid rgba(29, 155, 240, 0.9);
+  outline-offset: 2px;
+}
+
+.todox-action-button:disabled {
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(247, 249, 249, 0.45);
+  cursor: not-allowed;
+}
+
+.todox-action-button--focus {
+  font-size: 13px;
+}
+
+.todox-action-button--share {
+  font-size: 0;
+}
+
+.todox-icon {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.todox-circle-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(247, 249, 249, 0.5);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.todox-circle-button:hover {
   background: rgba(29, 155, 240, 0.25);
 }
 
-.todox-action-button:disabled,
-.todox-action-button--disabled {
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(247, 249, 249, 0.4);
-  cursor: not-allowed;
+.todox-circle-button:focus-visible {
+  outline: 2px solid rgba(29, 155, 240, 0.9);
+  outline-offset: 2px;
+}
+
+.todox-complete-pulse {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid rgba(29, 155, 240, 0.4);
+  top: 50%;
+  left: 16px;
+  transform: translate(-50%, -50%);
+  animation: todox-pulse 0.5s ease;
   pointer-events: none;
+}
+
+@keyframes todox-pulse {
+  from {
+    transform: translate(-50%, -50%) scale(0.6);
+    opacity: 0.8;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1.5);
+    opacity: 0;
+  }
 }
 
 .todox-collapsible {
   border-radius: 16px;
   overflow: hidden;
+  background: rgba(15, 20, 25, 0.6);
   margin-bottom: 12px;
-  background: rgba(15, 20, 25, 0.65);
-  color: #f7f9f9;
+  color: inherit;
 }
 
 .todox-collapsible__summary {
-  cursor: pointer;
-  list-style: none;
   padding: 12px 16px;
+  cursor: pointer;
   font-weight: 600;
   font-size: 15px;
 }
 
 .todox-collapsible__summary::-webkit-details-marker {
   display: none;
-}
-
-.todox-collapsible__summary::after {
-  content: '▸';
-  float: right;
-  transition: transform 0.2s ease;
-}
-
-.todox-collapsible[open] .todox-collapsible__summary::after {
-  transform: rotate(90deg);
-}
-
-.todox-collapsible > section,
-.todox-collapsible > div {
-  padding: 0 16px 16px;
 }

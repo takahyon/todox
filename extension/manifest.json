@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TodoX Sidebar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Collapse default sidebar modules on X.com and replace them with a lightweight TODO list.",
   "permissions": ["storage"],
   "content_scripts": [
@@ -10,6 +10,16 @@
       "js": ["contentScript.js"],
       "css": ["contentStyles.css"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "completed.html",
+        "completed.js",
+        "completed.css"
+      ],
+      "matches": ["<all_urls>"]
     }
   ]
 }
