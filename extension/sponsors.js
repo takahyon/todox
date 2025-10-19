@@ -1,6 +1,6 @@
 (function (root) {
   const SponsorLogic = root.TodoxSponsorLogic || {};
-  const { isActiveSponsor, selectWeightedSponsor, canShowUnderFrequency, recordImpression } = SponsorLogic;
+  const { isActiveSponsor, selectWeightedSponsor, canShowUnderFrequency, recordImpression, canShowSponsor, recordSponsorImpression } = SponsorLogic;
 
   class SponsorsManager {
     constructor(options = {}) {
@@ -105,33 +105,30 @@
     async selectSponsor(now = Date.now()) {
       if (this.isPremiumActive()) {
         this.currentSponsor = null;
+        console.debug && console.debug('SponsorsManager: premium active — skipping sponsors');
         return null;
       }
       const config = await this.loadConfig();
       if (!config || !Array.isArray(config.items)) {
-        return null;
-      }
-      if (!canShowUnderFrequency || !recordImpression) {
+        console.debug && console.debug('SponsorsManager: no config or empty items');
         return null;
       }
       const storages = this.getStorages();
-      if (!canShowUnderFrequency(config.frequencyCap, storages, now)) {
-        return null;
-      }
+      // TEMPORARY CHANGE: Disable frequency cap checks for testing so sponsors can always appear.
       if (this.currentSponsor && this.isSponsorStillValid(this.currentSponsor, config, now)) {
+        console.debug && console.debug('SponsorsManager: returning cached currentSponsor', this.currentSponsor && this.currentSponsor.id);
         return this.currentSponsor;
       }
       const active = config.items.filter((item) => isActiveSponsor ? isActiveSponsor(item, now) : true);
-      const candidates = active.filter((item) => !this.isDismissed(item.id));
+      let candidates = active.filter((item) => !this.isDismissed(item.id));
+      console.debug && console.debug('SponsorsManager: candidates after dismiss filter (frequency disabled)', candidates.map(c => c.id));
       if (candidates.length === 0) {
+        console.debug && console.debug('SponsorsManager: no candidates available');
         return null;
       }
       const choice = selectWeightedSponsor ? selectWeightedSponsor(candidates) : candidates[0];
-      if (!choice) {
-        return null;
-      }
-      this.currentSponsor = choice;
-      recordImpression(config.frequencyCap, storages, now);
+      console.debug && console.debug('SponsorsManager: chosen sponsor', choice && choice.id);
+      // TEMPORARY CHANGE: skip recording impressions while testing frequency disabled
       return choice;
     }
 

@@ -7,12 +7,15 @@
   "items": [
     {
       "id": "demo-cafe-2025",
-      "label": "☕ Focus support: Demo Cafe Roasters",
-      "url": "https://example.com/cafe",
-      "weight": 2,
+      "label": "☕ Focus support: Studio EagleSign",
+      "url": "https://www.studio-eaglesign.com/",
+      "weight": 1,
       "activeFrom": "2024-01-01",
       "activeTo": "2026-01-01",
-      "tags": ["coffee", "calm"]
+      "tags": [
+        "coffee",
+        "calm"
+      ]
     },
     {
       "id": "demo-stationery-2025",
@@ -21,7 +24,10 @@
       "weight": 1,
       "activeFrom": "2024-01-01",
       "activeTo": "2026-01-01",
-      "tags": ["stationery", "focus"]
+      "tags": [
+        "stationery",
+        "focus"
+      ]
     }
   ]
 }

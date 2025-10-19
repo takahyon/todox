@@ -25,7 +25,8 @@
         "branding.js",
         "completed.html",
         "completed.js",
-        "completed.css"
+        "completed.css",
+        "sponsors.json"
       ],
       "matches": ["<all_urls>"]
     }

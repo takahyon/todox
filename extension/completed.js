@@ -7,10 +7,10 @@ const BRANDING =
   typeof window !== 'undefined' && window.TODOX_BRANDING
     ? window.TODOX_BRANDING
     : {
-        developerName: 'あいづたか@TakaAizu',
-        developerUrl: 'https://x.com/TakaAizu',
-        promoHtml: '新アルバムをM3にて発売予定！',
-      };
+      developerName: 'あいづたか@TakaAizu',
+      developerUrl: 'https://x.com/TakaAizu',
+      promoHtml: '<a href="https://x.com/TakaAizu/status/1976588524997550265">新アルバムをM3にて発売予定！</a>',
+    };
 
 const focusSummaryEl = document.getElementById('focusSummary');
 const historyListEl = document.getElementById('historyList');

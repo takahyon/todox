@@ -2,7 +2,7 @@
   const DEFAULT_BRANDING = {
     developerName: "あいづたか@TakaAizu",
     developerUrl: "https://x.com/TakaAizu",
-    promoHtml: "新アルバムをM3にて発売予定！",
+    promoHtml: "<a href='https://x.com/TakaAizu/status/1976588524997550265'>新アルバムをM3にて発売予定！</a>",
   };
 
   const DEFAULT_CONFIG = {

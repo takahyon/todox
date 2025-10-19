@@ -167,10 +167,10 @@ const BRANDING =
   typeof window !== "undefined" && window.TODOX_BRANDING
     ? window.TODOX_BRANDING
     : {
-        developerName: "あいづたか@TakaAizu",
-        developerUrl: "https://x.com/TakaAizu",
-        promoHtml: "新アルバムをM3にて発売予定！",
-      };
+      developerName: "あいづたか@TakaAizu",
+      developerUrl: "https://x.com/TakaAizu",
+      promoHtml: "<a href='https://x.com/TakaAizu/status/1976588524997550265'>新アルバムをM3にて発売予定！</a>",
+    };
 
 const X_ICON_SVG =
   '<svg class="todox-icon todox-icon--x" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.98 3.5h-3.11L12.9 10l4.71 6.5h3.03l-4.65-6.39L20.98 3.5Zm-8.85 0H3l5.94 8.19L3.25 20.5h3.11l4.94-6.81L16.8 20.5h3.13l-6.05-8.3L18.9 3.5h-3.06l-4.71 6.39L12.13 3.5Z"></path></svg>';
@@ -222,12 +222,12 @@ class StorageAdapter {
           chrome.storage.sync.get(
             [STORAGE_KEY, HISTORY_KEY, LEGACY_STORAGE_KEY, LEGACY_HISTORY_KEY],
             (result) => {
-            if (chrome.runtime?.lastError) {
-              console.error("TodoX failed to load storage", chrome.runtime.lastError);
-              resolve({});
-              return;
-            }
-            resolve(result);
+              if (chrome.runtime?.lastError) {
+                console.error("TodoX failed to load storage", chrome.runtime.lastError);
+                resolve({});
+                return;
+              }
+              resolve(result);
             }
           );
         });
@@ -399,10 +399,129 @@ class TodoXApp {
     this.bgmController = new FocusBgmController();
     this.pendingSponsorRequest = null;
     this.premium = typeof window !== "undefined" ? window.TODOX_PREMIUM : null;
-    this.sponsorsManager =
-      typeof window !== "undefined" && window.TodoxSponsorsManager
-        ? new window.TodoxSponsorsManager({ premiumManager: this.premium })
-        : null;
+    // Initialize sponsors manager. If the packaged SponsorsManager didn't run for
+    // any reason (e.g. content script loading order issues), provide a lightweight
+    // fallback implementation that loads sponsors.json directly.
+    this.sponsorsManager = (function initSponsorsManager(premium) {
+      if (typeof window !== "undefined" && window.TodoxSponsorsManager) {
+        try {
+          return new window.TodoxSponsorsManager({ premiumManager: premium });
+        } catch (e) {
+          // fall through to fallback
+        }
+      }
+
+      // Fallback manager using the SponsorLogic helpers if available
+      const SponsorLogic = typeof window !== 'undefined' ? window.TodoxSponsorLogic || {} : {};
+      const {
+        isActiveSponsor,
+        selectWeightedSponsor,
+        canShowUnderFrequency,
+        recordImpression,
+        canShowSponsor,
+        recordSponsorImpression,
+      } = SponsorLogic;
+
+      class FallbackSponsorsManager {
+        constructor(options = {}) {
+          this.premiumManager = options.premiumManager || null;
+          this.config = null;
+          this.currentSponsor = null;
+          this.lastFetchedAt = 0;
+        }
+
+        async init() {
+          if (this.config && Date.now() - this.lastFetchedAt < 1000 * 60 * 5) return;
+          try {
+            const url = (typeof chrome !== 'undefined' && chrome.runtime?.getURL)
+              ? chrome.runtime.getURL('sponsors.json')
+              : 'sponsors.json';
+            const res = await fetch(url, { cache: 'no-store' });
+            if (res.ok) this.config = await res.json();
+          } catch (e) {
+            this.config = { version: 1, items: [], frequencyCap: null };
+          }
+          this.lastFetchedAt = Date.now();
+        }
+
+        getStorages() {
+          return { session: typeof sessionStorage !== 'undefined' ? sessionStorage : null, local: typeof localStorage !== 'undefined' ? localStorage : null };
+        }
+
+        isPremiumActive() {
+          return this.premiumManager && typeof this.premiumManager.isActive === 'function'
+            ? this.premiumManager.isActive()
+            : false;
+        }
+
+        isDismissed(id) {
+          try {
+            return sessionStorage.getItem(`todox.sponsor.dismissed.${id}`) === '1';
+          } catch (e) {
+            return false;
+          }
+        }
+
+        markDismissed(id) {
+          try {
+            sessionStorage.setItem(`todox.sponsor.dismissed.${id}`, '1');
+          } catch (e) { }
+        }
+
+        async selectSponsor(now = Date.now()) {
+          if (this.isPremiumActive()) {
+            this.currentSponsor = null;
+            return null;
+          }
+          await this.init();
+          const cfg = this.config || { items: [], frequencyCap: null };
+          if (!cfg || !Array.isArray(cfg.items) || cfg.items.length === 0) return null;
+          const storages = this.getStorages();
+          if (this.currentSponsor && this.currentSponsor.id && this._isSponsorValid(this.currentSponsor, cfg, now)) {
+            return this.currentSponsor;
+          }
+          const active = cfg.items.filter((i) => (isActiveSponsor ? isActiveSponsor(i, now) : true));
+          let candidates = active.filter((i) => !this.isDismissed(i.id));
+          if (typeof canShowSponsor === 'function' && cfg.frequencyCap) {
+            candidates = candidates.filter((i) => canShowSponsor(cfg.frequencyCap, storages, i.id, now));
+          } else if (typeof canShowUnderFrequency === 'function' && cfg.frequencyCap) {
+            if (!canShowUnderFrequency(cfg.frequencyCap, storages, now)) return null;
+          }
+          if (candidates.length === 0) return null;
+          const choice = selectWeightedSponsor ? selectWeightedSponsor(candidates) : candidates[0];
+          this.currentSponsor = choice;
+          if (choice) {
+            if (typeof recordSponsorImpression === 'function' && cfg.frequencyCap) {
+              recordSponsorImpression(cfg.frequencyCap, storages, choice.id, now);
+            } else if (typeof recordImpression === 'function') {
+              recordImpression(cfg.frequencyCap, storages, now);
+            }
+          }
+          return choice;
+        }
+
+        _isSponsorValid(sponsor, cfg, now = Date.now()) {
+          if (!sponsor) return false;
+          if (this.isDismissed(sponsor.id)) return false;
+          if (isActiveSponsor && !isActiveSponsor(sponsor, now)) return false;
+          if (!cfg.items.some((item) => item.id === sponsor.id)) return false;
+          return true;
+        }
+
+        dismissCurrentSponsor() {
+          if (this.currentSponsor && this.currentSponsor.id) {
+            this.markDismissed(this.currentSponsor.id);
+            this.currentSponsor = null;
+          }
+        }
+
+        markDismissed(id) {
+          try { sessionStorage.setItem(`todox.sponsor.dismissed.${id}`, '1'); } catch (e) { }
+        }
+      }
+
+      return new FallbackSponsorsManager({ premiumManager: premium });
+    })(this.premium);
   }
 
   async start() {
@@ -645,7 +764,7 @@ class TodoXApp {
           </section>
           <section class="todox-settings__section todox-settings__section--telemetry">
             <label class="todox-telemetry-toggle">
-              <input type="checkbox" class="todox-telemetry-toggle__input" />
+              <input type="checkbox" name="todox-telemetry" id="todox-telemetry" class="todox-telemetry-toggle__input" />
               <span>匿名の利用状況を共有して品質向上に協力する (任意)</span>
             </label>
           </section>
@@ -687,8 +806,17 @@ class TodoXApp {
     const historyButton = container.querySelector('.todox-history-button');
     historyButton?.addEventListener('click', () => this.openHistory());
     this.focusSponsorDismissButton?.addEventListener('click', () => {
-      if (this.sponsorsManager && typeof this.sponsorsManager.dismissCurrentSponsor === 'function') {
-        this.sponsorsManager.dismissCurrentSponsor();
+      // If a sponsor id is present on the element, mark it dismissed explicitly.
+      const sponsorId = this.focusSponsorEl?.dataset?.sponsorId;
+      try {
+        if (sponsorId && this.sponsorsManager && typeof this.sponsorsManager.markDismissed === 'function') {
+          this.sponsorsManager.markDismissed(sponsorId);
+        } else if (this.sponsorsManager && typeof this.sponsorsManager.dismissCurrentSponsor === 'function') {
+          // fallback: try to dismiss current sponsor instance
+          this.sponsorsManager.dismissCurrentSponsor();
+        }
+      } catch (e) {
+        // ignore
       }
       this.hideSponsorBanner();
     });
@@ -876,6 +1004,12 @@ class TodoXApp {
       this.focusSponsorLink.textContent = '';
       this.focusSponsorLink.removeAttribute('href');
     }
+    // clear any attached sponsor id
+    try {
+      if (this.focusSponsorEl && this.focusSponsorEl.dataset) {
+        delete this.focusSponsorEl.dataset.sponsorId;
+      }
+    } catch (e) { }
   }
 
   async refreshSponsorBanner() {
@@ -900,6 +1034,10 @@ class TodoXApp {
       if (this.focusSponsorLink) {
         this.focusSponsorLink.textContent = sponsor.label;
         this.focusSponsorLink.href = sponsor.url;
+        // attach sponsor id to DOM so dismiss can mark it even if currentSponsor isn't set yet
+        if (this.focusSponsorEl) {
+          this.focusSponsorEl.dataset.sponsorId = sponsor.id;
+        }
       }
       this.focusSponsorEl.hidden = false;
     } catch (error) {
@@ -970,7 +1108,7 @@ class TodoXApp {
           headers: { 'Content-Type': 'application/json' },
           body,
           keepalive: true,
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } catch (error) {
       // ignore diagnostics errors
@@ -1037,7 +1175,7 @@ class TodoXApp {
       : 'フォーカス中のタスクが落ち着いたら追加しましょう';
     inputItem.innerHTML = `
       <span class="todox-plus" aria-hidden="true">＋</span>
-      <input type="text" class="todox-input" placeholder="${placeholderText}" ${canAddTask ? '' : 'disabled'} />
+      <input type="text" name="todox-new-task" class="todox-input" placeholder="${placeholderText}" ${canAddTask ? '' : 'disabled'} />
       <div class="todox-actions">
         <button class="todox-action-button todox-action-button--focus" type="button" title="最初のタスクをフォーカス" ${canAddTask ? '' : 'disabled'}>▶︎</button>
       </div>
@@ -1127,7 +1265,7 @@ class TodoXApp {
     if (this.completedMoreEl) {
       const remaining = completedTasks.length - displayCompleted.length;
       if (remaining > 0) {
-        this.completedMoreEl.textContent = `ほか ${remaining} 件の達成があります`; 
+        this.completedMoreEl.textContent = `ほか ${remaining} 件の達成があります`;
         this.completedMoreEl.hidden = false;
       } else {
         this.completedMoreEl.hidden = true;
