@@ -10,9 +10,20 @@ const LEGACY_STORAGE_KEY = "todoxTasks";
 const LEGACY_HISTORY_KEY = "todoxCompletedHistory";
 const MAX_TASKS = 6;
 const HISTORY_LIMIT = 750;
+const COMPLETED_DISPLAY_LIMIT = 12;
 const HEARTBEAT_INTERVAL_MS = 2000;
 const LOCATION_POLL_INTERVAL_MS = 1000;
 const TIMER_TICK_MS = 1000;
+const SHOOT_ANIMATION_DURATION_MS = 600;
+
+const BRANDING =
+  typeof window !== "undefined" && window.TODOX_BRANDING
+    ? window.TODOX_BRANDING
+    : {
+        developerName: "あいづたか@TakaAizu",
+        developerUrl: "https://x.com/TakaAizu",
+        promoHtml: "新アルバムをM3にて発売予定！",
+      };
 
 const X_ICON_SVG =
   '<svg class="todox-icon todox-icon--x" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.98 3.5h-3.11L12.9 10l4.71 6.5h3.03l-4.65-6.39L20.98 3.5Zm-8.85 0H3l5.94 8.19L3.25 20.5h3.11l4.94-6.81L16.8 20.5h3.13l-6.05-8.3L18.9 3.5h-3.06l-4.71 6.39L12.13 3.5Z"></path></svg>';
@@ -202,7 +213,11 @@ class TodoXApp {
     this.history = [];
     this.sidebar = null;
     this.panel = null;
-    this.listEl = null;
+    this.activeListEl = null;
+    this.completedSection = null;
+    this.completedListEl = null;
+    this.completedEmptyEl = null;
+    this.completedMoreEl = null;
     this.progressEl = null;
     this.newTaskInput = null;
     this.isComposing = false;
@@ -351,16 +366,43 @@ class TodoXApp {
         <p class="todox-panel__progress" aria-live="polite"></p>
         <p class="todox-panel__hint">Enter でタスク追加、⌘⏎ で即時フォーカス</p>
       </header>
-      <ul class="todox-list"></ul>
+      <ul class="todox-list todox-list--active"></ul>
+      <section class="todox-done" aria-live="polite">
+        <div class="todox-done__header">
+          <h3 class="todox-done__title">DoneX</h3>
+          <span class="todox-done__subtitle">今日のがんばり</span>
+        </div>
+        <p class="todox-done__empty" hidden>まだ完了したタスクはありません。</p>
+        <ul class="todox-done__list"></ul>
+        <p class="todox-done__more" hidden></p>
+      </section>
       <footer class="todox-panel__footer">
-        developed by <a href="https://x.com/TakaAizu" target="_blank" rel="noopener noreferrer">@TakaAizu</a>
+        <p class="todox-panel__credit">
+          developed by <a class="todox-panel__credit-link" target="_blank" rel="noopener noreferrer"></a>
+        </p>
+        <div class="todox-panel__promo" hidden></div>
       </footer>
     `;
 
-    this.listEl = container.querySelector('.todox-list');
+    this.activeListEl = container.querySelector('.todox-list--active');
+    this.completedSection = container.querySelector('.todox-done');
+    this.completedListEl = container.querySelector('.todox-done__list');
+    this.completedEmptyEl = container.querySelector('.todox-done__empty');
+    this.completedMoreEl = container.querySelector('.todox-done__more');
     this.progressEl = container.querySelector('.todox-panel__progress');
     const historyButton = container.querySelector('.todox-history-button');
     historyButton?.addEventListener('click', () => this.openHistory());
+
+    const creditLink = container.querySelector('.todox-panel__credit-link');
+    if (creditLink) {
+      creditLink.href = BRANDING.developerUrl;
+      creditLink.textContent = BRANDING.developerName;
+    }
+    const promo = container.querySelector('.todox-panel__promo');
+    if (promo && BRANDING.promoHtml) {
+      promo.innerHTML = BRANDING.promoHtml;
+      promo.hidden = false;
+    }
 
     return container;
   }
@@ -395,19 +437,33 @@ class TodoXApp {
   }
 
   render() {
-    if (!this.listEl) {
+    if (!this.activeListEl || !this.completedListEl || !this.completedEmptyEl) {
       return;
     }
 
     this.sortTasks();
-    this.listEl.innerHTML = '';
 
-    const canAddTask = this.tasks.length < MAX_TASKS;
+    const activeTasks = this.tasks.filter((task) => !task.completed);
+    const completedTasks = this.tasks.filter((task) => task.completed);
+
+    this.renderActiveTasks(activeTasks);
+    this.renderCompletedTasks(completedTasks);
+    this.updateProgress(activeTasks.length, completedTasks.length);
+  }
+
+  renderActiveTasks(activeTasks) {
+    if (!this.activeListEl) {
+      return;
+    }
+
+    this.activeListEl.innerHTML = '';
+
+    const canAddTask = activeTasks.length < MAX_TASKS;
     const inputItem = document.createElement('li');
     inputItem.className = 'todox-list__item todox-list__item--new';
     const placeholderText = canAddTask
       ? 'ここに入力して Enter で追加'
-      : '最大6件まで追加できます';
+      : 'フォーカス中のタスクが落ち着いたら追加しましょう';
     inputItem.innerHTML = `
       <span class="todox-plus" aria-hidden="true">＋</span>
       <input type="text" class="todox-input" placeholder="${placeholderText}" ${canAddTask ? '' : 'disabled'} />
@@ -455,30 +511,61 @@ class TodoXApp {
       }
     });
 
-    this.listEl.appendChild(inputItem);
+    this.activeListEl.appendChild(inputItem);
 
-    if (this.tasks.length === 0) {
+    if (activeTasks.length === 0) {
       const emptyItem = document.createElement('li');
       emptyItem.className = 'todox-list__item todox-list__item--empty';
       emptyItem.innerHTML = '<span class="todox-empty-text">タスクはありません。今日やることを書き出しましょう！</span>';
-      this.listEl.appendChild(emptyItem);
+      this.activeListEl.appendChild(emptyItem);
     }
 
-    this.tasks.forEach((task) => {
-      const item = this.renderTask(task);
-      this.listEl.appendChild(item);
+    activeTasks.forEach((task) => {
+      const item = this.renderActiveTask(task);
+      this.activeListEl.appendChild(item);
     });
-
-    this.updateProgress();
   }
 
-  renderTask(task) {
+  renderCompletedTasks(completedTasks) {
+    if (!this.completedListEl || !this.completedEmptyEl || !this.completedSection) {
+      return;
+    }
+
+    this.completedListEl.innerHTML = '';
+
+    if (completedTasks.length === 0) {
+      this.completedEmptyEl.hidden = false;
+      this.completedSection.classList.add('todox-done--empty');
+      if (this.completedMoreEl) {
+        this.completedMoreEl.hidden = true;
+      }
+      return;
+    }
+
+    this.completedEmptyEl.hidden = true;
+    this.completedSection.classList.remove('todox-done--empty');
+
+    const displayCompleted = completedTasks.slice(0, COMPLETED_DISPLAY_LIMIT);
+    displayCompleted.forEach((task) => {
+      const item = this.renderCompletedTask(task);
+      this.completedListEl.appendChild(item);
+    });
+
+    if (this.completedMoreEl) {
+      const remaining = completedTasks.length - displayCompleted.length;
+      if (remaining > 0) {
+        this.completedMoreEl.textContent = `ほか ${remaining} 件の達成があります`; 
+        this.completedMoreEl.hidden = false;
+      } else {
+        this.completedMoreEl.hidden = true;
+      }
+    }
+  }
+
+  renderActiveTask(task) {
     const item = document.createElement('li');
     item.className = 'todox-list__item';
     item.dataset.taskId = task.id;
-    if (task.completed) {
-      item.classList.add('todox-list__item--completed');
-    }
     if (this.activeTaskId === task.id) {
       item.classList.add('todox-list__item--active');
     }
@@ -486,14 +573,9 @@ class TodoXApp {
     const circleButton = document.createElement('button');
     circleButton.className = 'todox-circle-button';
     circleButton.type = 'button';
-    circleButton.setAttribute('aria-label', task.completed ? '未完了に戻す' : '完了としてマーク');
-
+    circleButton.setAttribute('aria-label', '完了としてマーク');
     circleButton.addEventListener('click', () => {
-      if (task.completed) {
-        this.uncompleteTask(task.id);
-      } else {
-        this.completeTask(task.id);
-      }
+      this.completeTask(task.id);
     });
 
     const content = document.createElement('div');
@@ -517,11 +599,7 @@ class TodoXApp {
     focusButton.type = 'button';
     focusButton.textContent = this.activeTaskId === task.id ? '⏸' : '▶︎';
     focusButton.title = this.activeTaskId === task.id ? '一時停止' : 'フォーカス開始';
-    focusButton.disabled = task.completed;
     focusButton.addEventListener('click', () => {
-      if (task.completed) {
-        return;
-      }
       if (this.activeTaskId === task.id) {
         this.stopFocus();
       } else {
@@ -534,18 +612,13 @@ class TodoXApp {
     shareButton.type = 'button';
     shareButton.innerHTML = X_ICON_SVG;
     shareButton.title = '𝕏 でシェア';
-    shareButton.disabled = !task.completed;
-    shareButton.addEventListener('click', () => {
-      if (!task.completed) {
-        return;
-      }
-      this.shareTask(task);
-    });
+    shareButton.disabled = true;
 
     const deleteButton = document.createElement('button');
     deleteButton.className = 'todox-action-button';
     deleteButton.type = 'button';
-    deleteButton.textContent = '✕';
+    deleteButton.setAttribute('aria-label', 'タスクを削除');
+    deleteButton.textContent = '🗑️';
     deleteButton.title = '削除';
     deleteButton.addEventListener('click', () => {
       this.deleteTask(task.id);
@@ -559,26 +632,85 @@ class TodoXApp {
     item.appendChild(content);
     item.appendChild(actions);
 
-    if (task.completed) {
-      const pulse = document.createElement('span');
-      pulse.className = 'todox-complete-pulse';
-      item.appendChild(pulse);
+    return item;
+  }
+
+  renderCompletedTask(task) {
+    const item = document.createElement('li');
+    item.className = 'todox-done__item';
+    item.dataset.taskId = task.id;
+
+    const circleButton = document.createElement('button');
+    circleButton.className = 'todox-circle-button todox-circle-button--completed';
+    circleButton.type = 'button';
+    circleButton.innerHTML = '✓';
+    circleButton.setAttribute('aria-label', '未完了に戻す');
+    circleButton.addEventListener('click', () => {
+      this.uncompleteTask(task.id);
+    });
+
+    const content = document.createElement('div');
+    content.className = 'todox-task-content todox-task-content--done';
+
+    const text = document.createElement('p');
+    text.className = 'todox-task-text';
+    text.textContent = task.text;
+    content.appendChild(text);
+
+    const timer = document.createElement('span');
+    timer.className = 'todox-task-timer';
+    timer.textContent = `集中 ${this.formatTimer(task)}`;
+    content.appendChild(timer);
+
+    const actions = document.createElement('div');
+    actions.className = 'todox-actions';
+
+    const shareButton = document.createElement('button');
+    shareButton.className = 'todox-action-button todox-action-button--share';
+    shareButton.type = 'button';
+    shareButton.innerHTML = X_ICON_SVG;
+    shareButton.title = '𝕏 でシェア';
+    shareButton.addEventListener('click', () => {
+      this.shareTask(task);
+    });
+
+    actions.appendChild(shareButton);
+
+    item.appendChild(circleButton);
+    item.appendChild(content);
+    item.appendChild(actions);
+
+    if (task.justCompleted) {
+      item.classList.add('todox-done__item--new');
+      requestAnimationFrame(() => {
+        item.classList.add('todox-done__item--enter');
+        setTimeout(() => {
+          item.classList.remove('todox-done__item--enter');
+        }, SHOOT_ANIMATION_DURATION_MS);
+      });
+      delete task.justCompleted;
     }
 
     return item;
   }
 
-  updateProgress() {
+  updateProgress(activeCount, completedCount) {
     if (!this.progressEl) {
       return;
     }
-    const completed = this.tasks.filter((task) => task.completed).length;
-    const total = this.tasks.length;
-    const active = this.activeTaskId
+    const completed = typeof completedCount === 'number'
+      ? completedCount
+      : this.tasks.filter((task) => task.completed).length;
+    const activeTotal = typeof activeCount === 'number'
+      ? activeCount
+      : this.tasks.filter((task) => !task.completed).length;
+    const total = activeTotal + completed;
+    const activeTask = this.activeTaskId
       ? this.tasks.find((task) => task.id === this.activeTaskId)
       : undefined;
-    const focusText = active ? `フォーカス中: ${active.text}` : 'フォーカス待ち';
-    this.progressEl.textContent = `完了 ${completed}/${total} ・ ${focusText}`;
+    const focusText = activeTask ? `フォーカス中: ${activeTask.text}` : 'フォーカス待ち';
+    const remainingText = activeTotal > 0 ? `残り ${activeTotal} 件` : '全タスク完了！';
+    this.progressEl.textContent = `完了 ${completed}/${total} ・ ${remainingText} ・ ${focusText}`;
   }
 
   handleNewTaskSubmit() {
@@ -593,7 +725,8 @@ class TodoXApp {
   }
 
   addTask(text) {
-    if (this.tasks.length >= MAX_TASKS) {
+    const activeCount = this.tasks.filter((task) => !task.completed).length;
+    if (activeCount >= MAX_TASKS) {
       return null;
     }
     const now = Date.now();
@@ -639,6 +772,7 @@ class TodoXApp {
     task.completed = true;
     task.completedAt = now;
     task.runningSince = undefined;
+    task.justCompleted = true;
     const historyEntry = {
       id: `history-${now}-${Math.random().toString(16).slice(2)}`,
       text: task.text,
@@ -662,6 +796,7 @@ class TodoXApp {
     task.completed = false;
     task.completedAt = undefined;
     task.historyId = undefined;
+    delete task.justCompleted;
     if (previousHistoryId) {
       this.history = this.history.filter((entry) => entry.id !== previousHistoryId);
     }
@@ -715,7 +850,7 @@ class TodoXApp {
       }
       const now = Date.now();
       const elapsed = task.elapsedMs + (now - task.runningSince);
-      const item = this.listEl?.querySelector(`li[data-task-id="${task.id}"] .todox-task-timer`);
+      const item = this.activeListEl?.querySelector(`li[data-task-id="${task.id}"] .todox-task-timer`);
       if (item) {
         item.textContent = this.formatDuration(elapsed);
       }

@@ -3,12 +3,23 @@ const HISTORY_KEY = "todox.history";
 const LEGACY_STORAGE_KEY = "todoxTasks";
 const LEGACY_HISTORY_KEY = "todoxCompletedHistory";
 
+const BRANDING =
+  typeof window !== 'undefined' && window.TODOX_BRANDING
+    ? window.TODOX_BRANDING
+    : {
+        developerName: 'あいづたか@TakaAizu',
+        developerUrl: 'https://x.com/TakaAizu',
+        promoHtml: '新アルバムをM3にて発売予定！',
+      };
+
 const focusSummaryEl = document.getElementById('focusSummary');
 const historyListEl = document.getElementById('historyList');
 const historyEmptyEl = document.getElementById('historyEmpty');
 const tasksListEl = document.getElementById('tasksList');
 const tasksEmptyEl = document.getElementById('tasksEmpty');
 const exportButton = document.getElementById('exportButton');
+const developerLink = document.getElementById('historyDeveloper');
+const promoEl = document.getElementById('historyPromo');
 
 const state = {
   tasks: [],
@@ -18,11 +29,27 @@ const state = {
 init();
 
 function init() {
+  applyBranding();
   exportButton?.addEventListener('click', handleExport);
   loadState().then(() => {
     render();
     attachStorageListener();
   });
+}
+
+function applyBranding() {
+  if (developerLink) {
+    developerLink.href = BRANDING.developerUrl;
+    developerLink.textContent = BRANDING.developerName;
+  }
+  if (promoEl) {
+    if (BRANDING.promoHtml) {
+      promoEl.innerHTML = BRANDING.promoHtml;
+      promoEl.hidden = false;
+    } else {
+      promoEl.hidden = true;
+    }
+  }
 }
 
 function attachStorageListener() {
