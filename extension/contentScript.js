@@ -652,9 +652,6 @@ class TodoXApp {
     }
     panel.classList.toggle("todox-panel--collapsed", collapsed);
     panel.setAttribute("aria-expanded", String(!collapsed));
-    if (this.panelBody) {
-      this.panelBody.toggleAttribute("hidden", Boolean(collapsed));
-    }
     if (this.collapseButton) {
       this.collapseButton.setAttribute("aria-expanded", String(!collapsed));
       this.collapseButton.setAttribute(
@@ -779,14 +776,52 @@ class TodoXApp {
     }
     const updateHeight = () => {
       const rect = this.panel.getBoundingClientRect();
-      const offset = 16;
+      const offset = this.isCollapsed ? 12 : 16;
       const height = rect.height ? rect.height + offset : this.panel.offsetHeight + offset;
       this.panelPlaceholder.style.height = `${Math.max(height, 0)}px`;
+      this.updatePanelAnchoring();
     };
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
       window.requestAnimationFrame(updateHeight);
     } else {
       updateHeight();
+    }
+  }
+
+  updatePanelAnchoring() {
+    if (!this.panel || !this.panelPlaceholder || typeof window === 'undefined') {
+      return;
+    }
+
+    const placeholderRect = this.panelPlaceholder.getBoundingClientRect();
+    const viewportWidth = typeof window.innerWidth === 'number' ? window.innerWidth : 0;
+
+    const placeholderWidth = placeholderRect.width || this.panelPlaceholder.offsetWidth;
+    if (placeholderWidth) {
+      let widthToApply = placeholderWidth;
+      if (viewportWidth) {
+        const availableWidth = viewportWidth - 32;
+        if (availableWidth > 0) {
+          widthToApply = Math.min(widthToApply, availableWidth);
+        }
+      }
+      widthToApply = Math.min(widthToApply, 360);
+      widthToApply = Math.max(widthToApply, Math.min(placeholderWidth, 260));
+      this.panel.style.setProperty('--todox-anchor-width', `${Math.round(widthToApply)}px`);
+    }
+
+    if (viewportWidth && placeholderRect.width) {
+      const rightEdge = placeholderRect.right || (placeholderRect.left + placeholderRect.width);
+      const rightOffset = Math.max(viewportWidth - rightEdge, 16);
+      if (Number.isFinite(rightOffset)) {
+        this.panel.style.setProperty('--todox-anchor-right', `${rightOffset}px`);
+      }
+    }
+
+    const topOffset = placeholderRect.top || this.panelPlaceholder.offsetTop;
+    if (Number.isFinite(topOffset)) {
+      const clampedTop = Math.max(topOffset, 16);
+      this.panel.style.setProperty('--todox-anchor-top', `${clampedTop}px`);
     }
   }
 
