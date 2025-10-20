@@ -1,7 +1,86 @@
-const STORAGE_KEY = "todox.tasks";
-const HISTORY_KEY = "todox.history";
-const LEGACY_STORAGE_KEY = "todoxTasks";
-const LEGACY_HISTORY_KEY = "todoxCompletedHistory";
+const TodoxState = typeof window !== 'undefined' ? window.TodoxState : null;
+const STORAGE_KEY = TodoxState?.STORAGE_KEY ?? 'todox.tasks';
+const HISTORY_KEY = TodoxState?.HISTORY_KEY ?? 'todox.history';
+const LEGACY_STORAGE_KEY = TodoxState?.LEGACY_STORAGE_KEY ?? 'todoxTasks';
+const LEGACY_HISTORY_KEY = TodoxState?.LEGACY_HISTORY_KEY ?? 'todoxCompletedHistory';
+const normaliseTasksFn = (raw) => {
+  if (TodoxState?.normaliseTasks) {
+    const now = Date.now();
+    const fallback = TodoxState.createDefaultTasks ? TodoxState.createDefaultTasks(now) : undefined;
+    return TodoxState.normaliseTasks(raw, { now, fallbackTasks: fallback });
+  }
+  const now = Date.now();
+  const fallbackTasks = [
+    '今日のTODOを決める',
+    '最優先タスクに30分集中',
+    '受信トレイを整理',
+    'チームに進捗を共有',
+  ].map((text, index) => ({
+    id: `fallback-${index}`,
+    text,
+    createdAt: now + index,
+    completed: false,
+    elapsedMs: 0,
+  }));
+  const source = Array.isArray(raw) ? raw : fallbackTasks;
+  return source
+    .map((task, index) => ({
+      id: typeof task?.id === 'string' ? task.id : `task-${now}-${index}`,
+      text: String(task?.text ?? '').trim(),
+      createdAt: typeof task?.createdAt === 'number' ? task.createdAt : now,
+      completedAt: typeof task?.completedAt === 'number' ? task.completedAt : undefined,
+      elapsedMs: typeof task?.elapsedMs === 'number' ? task.elapsedMs : 0,
+      completed: Boolean(task?.completed),
+      runningSince: typeof task?.runningSince === 'number' ? task.runningSince : undefined,
+    }))
+    .filter((task) => task.text.length > 0);
+};
+const normaliseHistoryFn = (raw) => {
+  if (TodoxState?.normaliseHistory) {
+    const now = Date.now();
+    return TodoxState.normaliseHistory(raw, { now, limit: Number.POSITIVE_INFINITY, sortByCompletedAt: true });
+  }
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const now = Date.now();
+  return raw
+    .map((entry, index) => ({
+      id: typeof entry?.id === 'string' ? entry.id : `history-${now}-${index}`,
+      text: String(entry?.text ?? '').trim(),
+      createdAt: typeof entry?.createdAt === 'number' ? entry.createdAt : now,
+      completedAt: typeof entry?.completedAt === 'number' ? entry.completedAt : now,
+      elapsedMs: typeof entry?.elapsedMs === 'number' ? entry.elapsedMs : 0,
+    }))
+    .filter((entry) => entry.text.length > 0)
+    .sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
+};
+const computeFocusAnalyticsFn = TodoxState?.computeFocusAnalytics ?? ((history, now = Date.now()) => {
+  const summary = { todayMs: 0, weekMs: 0, totalMs: 0 };
+  if (!Array.isArray(history) || history.length === 0) {
+    return summary;
+  }
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const startOfToday = today.getTime();
+  const startOfWeekDate = new Date(startOfToday);
+  startOfWeekDate.setDate(startOfWeekDate.getDate() - 6);
+  const startOfWeek = startOfWeekDate.getTime();
+
+  history.forEach((entry) => {
+    const completedAt = typeof entry?.completedAt === 'number' ? entry.completedAt : 0;
+    const elapsedMs = typeof entry?.elapsedMs === 'number' ? entry.elapsedMs : 0;
+    summary.totalMs += elapsedMs;
+    if (completedAt >= startOfToday) {
+      summary.todayMs += elapsedMs;
+    }
+    if (completedAt >= startOfWeek) {
+      summary.weekMs += elapsedMs;
+    }
+  });
+
+  return summary;
+});
 
 const BRANDING =
   typeof window !== 'undefined' && window.TODOX_BRANDING
@@ -93,8 +172,8 @@ async function loadState() {
       data[STORAGE_KEY] === undefined && Object.prototype.hasOwnProperty.call(data, LEGACY_STORAGE_KEY);
     const usedLegacyHistory =
       data[HISTORY_KEY] === undefined && Object.prototype.hasOwnProperty.call(data, LEGACY_HISTORY_KEY);
-    const tasks = normaliseTasks(data[STORAGE_KEY] ?? data[LEGACY_STORAGE_KEY]);
-    const history = normaliseHistory(data[HISTORY_KEY] ?? data[LEGACY_HISTORY_KEY]);
+    const tasks = normaliseTasksFn(data[STORAGE_KEY] ?? data[LEGACY_STORAGE_KEY]);
+    const history = normaliseHistoryFn(data[HISTORY_KEY] ?? data[LEGACY_HISTORY_KEY]);
     state.tasks = tasks;
     state.history = history;
     if (usedLegacyTasks || usedLegacyHistory) {
@@ -111,8 +190,8 @@ async function loadState() {
       window.localStorage?.getItem(STORAGE_KEY) ?? window.localStorage?.getItem(LEGACY_STORAGE_KEY) ?? '[]';
     const historyJson =
       window.localStorage?.getItem(HISTORY_KEY) ?? window.localStorage?.getItem(LEGACY_HISTORY_KEY) ?? '[]';
-    const tasks = normaliseTasks(JSON.parse(tasksJson));
-    const history = normaliseHistory(JSON.parse(historyJson));
+    const tasks = normaliseTasksFn(JSON.parse(tasksJson));
+    const history = normaliseHistoryFn(JSON.parse(historyJson));
     state.tasks = tasks;
     state.history = history;
     const usedLegacyLocal =
@@ -133,39 +212,6 @@ async function loadState() {
   }
 }
 
-function normaliseTasks(raw) {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  return raw
-    .map((task) => ({
-      id: typeof task?.id === 'string' ? task.id : `task-${Date.now()}`,
-      text: String(task?.text ?? '').trim(),
-      createdAt: typeof task?.createdAt === 'number' ? task.createdAt : Date.now(),
-      completedAt: typeof task?.completedAt === 'number' ? task.completedAt : undefined,
-      elapsedMs: typeof task?.elapsedMs === 'number' ? task.elapsedMs : 0,
-      completed: Boolean(task?.completed),
-      runningSince: typeof task?.runningSince === 'number' ? task.runningSince : undefined,
-    }))
-    .filter((task) => task.text.length > 0);
-}
-
-function normaliseHistory(raw) {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  return raw
-    .map((entry) => ({
-      id: typeof entry?.id === 'string' ? entry.id : `history-${Date.now()}`,
-      text: String(entry?.text ?? '').trim(),
-      createdAt: typeof entry?.createdAt === 'number' ? entry.createdAt : Date.now(),
-      completedAt: typeof entry?.completedAt === 'number' ? entry.completedAt : Date.now(),
-      elapsedMs: typeof entry?.elapsedMs === 'number' ? entry.elapsedMs : 0,
-    }))
-    .filter((entry) => entry.text.length > 0)
-    .sort((a, b) => (b.completedAt ?? 0) - (a.completedAt ?? 0));
-}
-
 function render() {
   renderSummary();
   renderHistory();
@@ -175,8 +221,9 @@ function render() {
 function renderSummary() {
   const todayStart = startOfToday();
   const todayHistory = state.history.filter((item) => (item.completedAt ?? 0) >= todayStart);
-  const todayFocus = sumElapsed(todayHistory);
-  const totalFocus = sumElapsed(state.history);
+  const analytics = computeFocusAnalyticsFn(state.history);
+  const todayFocus = analytics.todayMs;
+  const totalFocus = analytics.totalMs;
   const active = state.tasks.find((task) => task.runningSince);
   const upcoming = state.tasks.filter((task) => !task.completed);
 
@@ -258,10 +305,6 @@ function handleExport() {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
-}
-
-function sumElapsed(items) {
-  return items.reduce((total, entry) => total + (entry.elapsedMs ?? 0), 0);
 }
 
 function startOfToday() {

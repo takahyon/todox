@@ -8,6 +8,7 @@
     {
       "matches": ["https://x.com/*", "https://twitter.com/*"],
       "js": [
+        "lib/state.js",
         "lib/verifyLicense.js",
         "lib/sponsorLogic.js",
         "branding.js",

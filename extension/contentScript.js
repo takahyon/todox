@@ -4,12 +4,60 @@ const SECTION_TITLES_TO_COLLAPSE = [
   "今を見つけよう"
 ];
 
-const STORAGE_KEY = "todox.tasks";
-const HISTORY_KEY = "todox.history";
-const LEGACY_STORAGE_KEY = "todoxTasks";
-const LEGACY_HISTORY_KEY = "todoxCompletedHistory";
+const TodoxState = typeof window !== "undefined" ? window.TodoxState : null;
+const HISTORY_LIMIT = TodoxState?.HISTORY_LIMIT ?? 750;
+const StorageAdapterClass = TodoxState?.StorageAdapter ?? class {
+  async load() {
+    return { tasks: [], history: [] };
+  }
+
+  async save() {}
+
+  onExternalChange() {
+    return () => {};
+  }
+};
+const computeFocusAnalytics =
+  TodoxState?.computeFocusAnalytics ?? ((history, now = Date.now()) => {
+    const summary = { todayMs: 0, weekMs: 0, totalMs: 0 };
+    if (!Array.isArray(history) || history.length === 0) {
+      return summary;
+    }
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const startOfToday = today.getTime();
+    const startOfWeekDate = new Date(startOfToday);
+    startOfWeekDate.setDate(startOfWeekDate.getDate() - 6);
+    const startOfWeek = startOfWeekDate.getTime();
+
+    history.forEach((entry) => {
+      const completedAt = typeof entry?.completedAt === "number" ? entry.completedAt : 0;
+      const elapsedMs = typeof entry?.elapsedMs === "number" ? entry.elapsedMs : 0;
+      summary.totalMs += elapsedMs;
+      if (completedAt >= startOfToday) {
+        summary.todayMs += elapsedMs;
+      }
+      if (completedAt >= startOfWeek) {
+        summary.weekMs += elapsedMs;
+      }
+    });
+
+    return summary;
+  });
+const formatMinutesFromMs =
+  TodoxState?.formatMinutesFromMs ?? ((ms) => {
+    const totalMinutes = Math.floor(ms / 60000);
+    if (totalMinutes <= 0) {
+      return "0分";
+    }
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours > 0) {
+      return `${hours}時間${minutes}分`;
+    }
+    return `${minutes}分`;
+  });
 const MAX_TASKS = 6;
-const HISTORY_LIMIT = 750;
 const COMPLETED_DISPLAY_LIMIT = 12;
 const HEARTBEAT_INTERVAL_MS = 2000;
 const LOCATION_POLL_INTERVAL_MS = 1000;
@@ -119,50 +167,6 @@ class FocusBgmController {
   }
 }
 
-function computeFocusAnalytics(history, now = Date.now()) {
-  const summary = {
-    todayMs: 0,
-    weekMs: 0,
-    totalMs: 0,
-  };
-  if (!Array.isArray(history) || history.length === 0) {
-    return summary;
-  }
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  const startOfToday = today.getTime();
-  const startOfWeekDate = new Date(startOfToday);
-  startOfWeekDate.setDate(startOfWeekDate.getDate() - 6);
-  const startOfWeek = startOfWeekDate.getTime();
-
-  history.forEach((entry) => {
-    const completedAt = typeof entry?.completedAt === "number" ? entry.completedAt : 0;
-    const elapsedMs = typeof entry?.elapsedMs === "number" ? entry.elapsedMs : 0;
-    summary.totalMs += elapsedMs;
-    if (completedAt >= startOfToday) {
-      summary.todayMs += elapsedMs;
-    }
-    if (completedAt >= startOfWeek) {
-      summary.weekMs += elapsedMs;
-    }
-  });
-
-  return summary;
-}
-
-function formatMinutesFromMs(ms) {
-  const totalMinutes = Math.floor(ms / 60000);
-  if (totalMinutes <= 0) {
-    return "0分";
-  }
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (hours > 0) {
-    return `${hours}時間${minutes}分`;
-  }
-  return `${minutes}分`;
-}
-
 const BRANDING =
   typeof window !== "undefined" && window.TODOX_BRANDING
     ? window.TODOX_BRANDING
@@ -175,187 +179,18 @@ const BRANDING =
 const X_ICON_SVG =
   '<svg class="todox-icon todox-icon--x" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.98 3.5h-3.11L12.9 10l4.71 6.5h3.03l-4.65-6.39L20.98 3.5Zm-8.85 0H3l5.94 8.19L3.25 20.5h3.11l4.94-6.81L16.8 20.5h3.13l-6.05-8.3L18.9 3.5h-3.06l-4.71 6.39L12.13 3.5Z"></path></svg>';
 
-const DEFAULT_TASKS = [
-  "今日のTODOを決める",
-  "最優先タスクに30分集中",
-  "受信トレイを整理",
-  "チームに進捗を共有"
-];
-
-class StorageAdapter {
-  constructor() {
-    this.useChromeSync = Boolean(typeof chrome !== "undefined" && chrome.storage?.sync);
-    this.onChangeCallbacks = new Set();
-    this.lastSerializedTasks = "";
-    this.lastSerializedHistory = "";
-    if (this.useChromeSync) {
-      chrome.storage.onChanged.addListener((changes, area) => {
-        if (area !== "sync") {
-          return;
-        }
-        let shouldNotify = false;
-        if (STORAGE_KEY in changes) {
-          const serialized = JSON.stringify(changes[STORAGE_KEY].newValue ?? []);
-          if (serialized !== this.lastSerializedTasks) {
-            shouldNotify = true;
-            this.lastSerializedTasks = serialized;
-          }
-        }
-        if (HISTORY_KEY in changes) {
-          const serialized = JSON.stringify(changes[HISTORY_KEY].newValue ?? []);
-          if (serialized !== this.lastSerializedHistory) {
-            shouldNotify = true;
-            this.lastSerializedHistory = serialized;
-          }
-        }
-        if (shouldNotify) {
-          this.onChangeCallbacks.forEach((cb) => cb());
-        }
-      });
-    }
-  }
-
-  async load() {
-    if (this.useChromeSync) {
-      try {
-        const data = await new Promise((resolve) => {
-          chrome.storage.sync.get(
-            [STORAGE_KEY, HISTORY_KEY, LEGACY_STORAGE_KEY, LEGACY_HISTORY_KEY],
-            (result) => {
-              if (chrome.runtime?.lastError) {
-                console.error("TodoX failed to load storage", chrome.runtime.lastError);
-                resolve({});
-                return;
-              }
-              resolve(result);
-            }
-          );
-        });
-        const usedLegacyTasks =
-          data[STORAGE_KEY] === undefined && Object.prototype.hasOwnProperty.call(data, LEGACY_STORAGE_KEY);
-        const usedLegacyHistory =
-          data[HISTORY_KEY] === undefined && Object.prototype.hasOwnProperty.call(data, LEGACY_HISTORY_KEY);
-        const tasks = this.normaliseTasks(data[STORAGE_KEY] ?? data[LEGACY_STORAGE_KEY]);
-        const history = this.normaliseHistory(data[HISTORY_KEY] ?? data[LEGACY_HISTORY_KEY]);
-        this.lastSerializedTasks = JSON.stringify(tasks);
-        this.lastSerializedHistory = JSON.stringify(history);
-        if (usedLegacyTasks || usedLegacyHistory) {
-          await this.save(tasks, history);
-          chrome.storage.sync.remove([LEGACY_STORAGE_KEY, LEGACY_HISTORY_KEY]);
-        }
-        return { tasks, history };
-      } catch (error) {
-        console.error("TodoX failed to read from chrome.storage", error);
-      }
-    }
-
-    try {
-      const tasksJson =
-        window.localStorage?.getItem(STORAGE_KEY) ?? window.localStorage?.getItem(LEGACY_STORAGE_KEY);
-      const historyJson =
-        window.localStorage?.getItem(HISTORY_KEY) ?? window.localStorage?.getItem(LEGACY_HISTORY_KEY);
-      const tasks = this.normaliseTasks(tasksJson ? JSON.parse(tasksJson) : undefined);
-      const history = this.normaliseHistory(historyJson ? JSON.parse(historyJson) : undefined);
-      this.lastSerializedTasks = JSON.stringify(tasks);
-      this.lastSerializedHistory = JSON.stringify(history);
-      const usedLegacyLocal =
-        (!window.localStorage?.getItem(STORAGE_KEY) && window.localStorage?.getItem(LEGACY_STORAGE_KEY)) ||
-        (!window.localStorage?.getItem(HISTORY_KEY) && window.localStorage?.getItem(LEGACY_HISTORY_KEY));
-      if (usedLegacyLocal) {
-        await this.save(tasks, history);
-        window.localStorage?.removeItem(LEGACY_STORAGE_KEY);
-        window.localStorage?.removeItem(LEGACY_HISTORY_KEY);
-      }
-      return { tasks, history };
-    } catch (error) {
-      console.error("TodoX failed to read from localStorage", error);
-    }
-
-    const fallbackTasks = this.normaliseTasks();
-    return { tasks: fallbackTasks, history: [] };
-  }
-
-  async save(tasks, history) {
-    const serialisedTasks = JSON.stringify(tasks);
-    const serialisedHistory = JSON.stringify(history);
-    this.lastSerializedTasks = serialisedTasks;
-    this.lastSerializedHistory = serialisedHistory;
-
-    if (this.useChromeSync) {
-      await new Promise((resolve) => {
-        chrome.storage.sync.set(
-          {
-            [STORAGE_KEY]: tasks,
-            [HISTORY_KEY]: history,
-          },
-          () => {
-            if (chrome.runtime?.lastError) {
-              console.error("TodoX failed to save to chrome.storage", chrome.runtime.lastError);
-            }
-            resolve();
-          }
-        );
-      });
-      return;
-    }
-
-    try {
-      window.localStorage?.setItem(STORAGE_KEY, serialisedTasks);
-      window.localStorage?.setItem(HISTORY_KEY, serialisedHistory);
-    } catch (error) {
-      console.error("TodoX failed to save to localStorage", error);
-    }
-  }
-
-  onExternalChange(callback) {
-    this.onChangeCallbacks.add(callback);
-    return () => this.onChangeCallbacks.delete(callback);
-  }
-
-  normaliseTasks(rawTasks) {
-    const now = Date.now();
-    const source = Array.isArray(rawTasks) ? rawTasks : DEFAULT_TASKS.map((text, index) => ({
-      id: `default-${index}`,
-      text,
-      createdAt: now + index,
-      completed: false,
-      elapsedMs: 0,
-    }));
-    return source
-      .map((task, index) => ({
-        id: typeof task?.id === "string" ? task.id : `task-${now}-${index}`,
-        text: String(task?.text ?? "").trim(),
-        createdAt: typeof task?.createdAt === "number" ? task.createdAt : now,
-        completed: Boolean(task?.completed),
-        completedAt: typeof task?.completedAt === "number" ? task.completedAt : undefined,
-        elapsedMs: typeof task?.elapsedMs === "number" ? task.elapsedMs : 0,
-        runningSince: typeof task?.runningSince === "number" ? task.runningSince : undefined,
-        historyId: typeof task?.historyId === "string" ? task.historyId : undefined,
-      }))
-      .filter((task) => task.text.length > 0);
-  }
-
-  normaliseHistory(rawHistory) {
-    if (!Array.isArray(rawHistory)) {
-      return [];
-    }
-    const now = Date.now();
-    return rawHistory
-      .map((entry, index) => ({
-        id: typeof entry?.id === "string" ? entry.id : `history-${now}-${index}`,
-        text: String(entry?.text ?? "").trim(),
-        createdAt: typeof entry?.createdAt === "number" ? entry.createdAt : now,
-        completedAt: typeof entry?.completedAt === "number" ? entry.completedAt : now,
-        elapsedMs: typeof entry?.elapsedMs === "number" ? entry.elapsedMs : 0,
-      }))
-      .filter((entry) => entry.text.length > 0)
-      .slice(0, HISTORY_LIMIT);
-  }
-}
+const BRANDING =
+  typeof window !== "undefined" && window.TODOX_BRANDING
+    ? window.TODOX_BRANDING
+    : {
+      developerName: "あいづたか@TakaAizu",
+      developerUrl: "https://x.com/TakaAizu",
+      promoHtml: "<a href='https://x.com/TakaAizu/status/1976588524997550265'>新アルバムをM3にて発売予定！</a>",
+    };
 
 class TodoXApp {
   constructor() {
-    this.storage = new StorageAdapter();
+    this.storage = new StorageAdapterClass();
     this.tasks = [];
     this.history = [];
     this.sidebar = null;
