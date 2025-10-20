@@ -805,8 +805,8 @@ class TodoXApp {
           widthToApply = Math.min(widthToApply, availableWidth);
         }
       }
-      widthToApply = Math.min(widthToApply, 360);
-      widthToApply = Math.max(widthToApply, Math.min(placeholderWidth, 260));
+      widthToApply = Math.min(widthToApply, 320);
+      widthToApply = Math.max(widthToApply, Math.min(placeholderWidth, 240));
       this.panel.style.setProperty('--todox-anchor-width', `${Math.round(widthToApply)}px`);
     }
 
