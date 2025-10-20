@@ -15,6 +15,7 @@ const HEARTBEAT_INTERVAL_MS = 2000;
 const LOCATION_POLL_INTERVAL_MS = 1000;
 const TIMER_TICK_MS = 1000;
 const SHOOT_ANIMATION_DURATION_MS = 600;
+const COLLAPSE_STATE_KEY = "todox.ui.collapsed";
 
 const PREMIUM_FEATURE_MAP =
   typeof window !== "undefined" && window.TODOX_PREMIUM_FEATURES
@@ -360,6 +361,10 @@ class TodoXApp {
     this.history = [];
     this.sidebar = null;
     this.panel = null;
+    this.panelBody = null;
+    this.panelPlaceholder = null;
+    this.panelResizeObserver = null;
+    this.boundResizeHandler = null;
     this.activeListEl = null;
     this.completedSection = null;
     this.completedListEl = null;
@@ -396,6 +401,8 @@ class TodoXApp {
     };
     this.telemetryToggle = null;
     this.archiveButton = null;
+    this.collapseButton = null;
+    this.isCollapsed = this.loadCollapsePreference();
     this.bgmController = new FocusBgmController();
     this.pendingSponsorRequest = null;
     this.premium = typeof window !== "undefined" ? window.TODOX_PREMIUM : null;
@@ -588,6 +595,18 @@ class TodoXApp {
         clearInterval(this.locationInterval);
         this.locationInterval = null;
       }
+      if (this.boundResizeHandler) {
+        window.removeEventListener('resize', this.boundResizeHandler);
+        this.boundResizeHandler = null;
+      }
+      if (this.panelResizeObserver) {
+        try {
+          this.panelResizeObserver.disconnect();
+        } catch (error) {
+          // ignore disconnect errors
+        }
+        this.panelResizeObserver = null;
+      }
       this.stopTimer();
       if (this.detachPremiumListener) {
         this.detachPremiumListener();
@@ -598,6 +617,69 @@ class TodoXApp {
         this.detachStorageListener = null;
       }
     });
+  }
+
+  loadCollapsePreference() {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    try {
+      return localStorage.getItem(COLLAPSE_STATE_KEY) === "1";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  saveCollapsePreference(collapsed) {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      if (collapsed) {
+        localStorage.setItem(COLLAPSE_STATE_KEY, "1");
+      } else {
+        localStorage.removeItem(COLLAPSE_STATE_KEY);
+      }
+    } catch (error) {
+      // ignore persistence errors
+    }
+  }
+
+  applyCollapseState(panelElement, collapsed) {
+    const panel = panelElement || this.panel;
+    if (!panel) {
+      return;
+    }
+    panel.classList.toggle("todox-panel--collapsed", collapsed);
+    if (this.panelBody) {
+      if (collapsed) {
+        this.panelBody.setAttribute("hidden", "");
+      } else {
+        this.panelBody.removeAttribute("hidden");
+      }
+    }
+    if (this.collapseButton) {
+      this.collapseButton.setAttribute("aria-expanded", String(!collapsed));
+      this.collapseButton.setAttribute(
+        "aria-label",
+        collapsed ? "TodoXを展開する" : "TodoXを折りたたむ",
+      );
+      this.collapseButton.textContent = collapsed ? "＋" : "−";
+    }
+    this.updatePanelPlaceholderHeight();
+  }
+
+  setCollapsed(collapsed) {
+    if (this.isCollapsed === collapsed) {
+      return;
+    }
+    this.isCollapsed = collapsed;
+    this.saveCollapsePreference(collapsed);
+    this.applyCollapseState(this.panel, collapsed);
+  }
+
+  togglePanelCollapse() {
+    this.setCollapsed(!this.isCollapsed);
   }
 
   waitForSidebar() {
@@ -661,16 +743,53 @@ class TodoXApp {
   }
 
   ensurePanel(sidebar) {
-    if (this.panel && sidebar.contains(this.panel)) {
-      return;
+    if (!this.panel) {
+      this.panel = this.createPanel();
     }
 
-    this.panel = this.createPanel();
-    const firstSection = sidebar.querySelector('section, div[data-testid="cellInnerDiv"], div[aria-label]');
-    if (firstSection) {
-      firstSection.parentNode?.insertBefore(this.panel, firstSection);
+    const parentNode = document.body || document.documentElement;
+    if (this.panel && parentNode && !parentNode.contains(this.panel)) {
+      parentNode.appendChild(this.panel);
+    }
+
+    this.ensurePanelPlaceholder(sidebar);
+    this.updatePanelPlaceholderHeight();
+  }
+
+  ensurePanelPlaceholder(sidebar) {
+    if (!sidebar) {
+      return;
+    }
+    if (!this.panelPlaceholder) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'todox-panel__placeholder';
+      placeholder.setAttribute('aria-hidden', 'true');
+      this.panelPlaceholder = placeholder;
+    }
+    if (this.panelPlaceholder && !sidebar.contains(this.panelPlaceholder)) {
+      const firstSection = sidebar.querySelector('section, div[data-testid="cellInnerDiv"], div[aria-label]');
+      if (firstSection) {
+        firstSection.parentNode?.insertBefore(this.panelPlaceholder, firstSection);
+      } else {
+        sidebar.insertBefore(this.panelPlaceholder, sidebar.firstChild);
+      }
+    }
+  }
+
+  updatePanelPlaceholderHeight() {
+    if (!this.panel || !this.panelPlaceholder) {
+      return;
+    }
+    const updateHeight = () => {
+      const rect = this.panel.getBoundingClientRect();
+      const offset = 16;
+      const height = rect.height ? rect.height + offset : this.panel.offsetHeight + offset;
+      this.panelPlaceholder.style.height = `${Math.max(height, 0)}px`;
+    };
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(updateHeight);
     } else {
-      sidebar.insertBefore(this.panel, sidebar.firstChild);
+      updateHeight();
     }
   }
 
@@ -681,7 +800,10 @@ class TodoXApp {
       <header class="todox-panel__header">
         <div class="todox-panel__title-row">
           <h2 class="todox-panel__title">TodoX</h2>
-          <button class="todox-history-button" type="button">履歴を開く</button>
+          <div class="todox-panel__actions">
+            <button class="todox-history-button" type="button">履歴を開く</button>
+            <button class="todox-collapse-button" type="button" aria-expanded="true" aria-label="TodoXを折りたたむ">−</button>
+          </div>
         </div>
         <p class="todox-panel__progress" aria-live="polite"></p>
         <p class="todox-panel__hint">Enter でタスク追加、⌘⏎ で即時フォーカス</p>
@@ -691,30 +813,31 @@ class TodoXApp {
           <button class="todox-focus-sponsor__dismiss" type="button" aria-label="スポンサーを閉じる">×</button>
         </div>
       </header>
-      <ul class="todox-list todox-list--active"></ul>
-      <section class="todox-done" aria-live="polite">
-        <details class="todox-done__details" open>
-          <summary class="todox-done__summary">
-            <div class="todox-done__header">
-              <h3 class="todox-done__title">DoneX</h3>
-              <span class="todox-done__subtitle">今日のがんばり</span>
-              <button class="todox-done__archive" type="button">✨ 昇華</button>
+      <div class="todox-panel__body">
+        <ul class="todox-list todox-list--active"></ul>
+        <section class="todox-done" aria-live="polite">
+          <details class="todox-done__details" open>
+            <summary class="todox-done__summary">
+              <div class="todox-done__header">
+                <h3 class="todox-done__title">DoneX</h3>
+                <span class="todox-done__subtitle">今日のがんばり</span>
+                <button class="todox-done__archive" type="button">✨ 昇華</button>
+              </div>
+            </summary>
+            <div class="todox-done__content">
+              <p class="todox-done__empty" hidden>まだ完了したタスクはありません。</p>
+              <ul class="todox-done__list"></ul>
+              <p class="todox-done__more" hidden></p>
+              <div class="todox-done__celebration" aria-hidden="true"></div>
             </div>
+          </details>
+        </section>
+        <details class="todox-settings">
+          <summary class="todox-settings__summary" aria-label="設定を開く">
+            <span>⚙️ 設定</span>
           </summary>
-          <div class="todox-done__content">
-            <p class="todox-done__empty" hidden>まだ完了したタスクはありません。</p>
-            <ul class="todox-done__list"></ul>
-            <p class="todox-done__more" hidden></p>
-            <div class="todox-done__celebration" aria-hidden="true"></div>
-          </div>
-        </details>
-      </section>
-      <details class="todox-settings">
-        <summary class="todox-settings__summary" aria-label="設定を開く">
-          <span>⚙️ 設定</span>
-        </summary>
-        <div class="todox-settings__content">
-          <section class="todox-settings__section todox-settings__section--premium">
+          <div class="todox-settings__content">
+            <section class="todox-settings__section todox-settings__section--premium">
             <h3 class="todox-settings__heading">TodoX+ プレミアム</h3>
             <p class="todox-settings__status">未アンロック</p>
             <form class="todox-redeem-form">
@@ -770,15 +893,17 @@ class TodoXApp {
           </section>
         </div>
       </details>
-      <footer class="todox-panel__footer">
-        <p class="todox-panel__credit">
-          developed by <a class="todox-panel__credit-link" target="_blank" rel="noopener noreferrer"></a>
-        </p>
-        <div class="todox-panel__promo" hidden></div>
-      </footer>
+        <footer class="todox-panel__footer">
+          <p class="todox-panel__credit">
+            developed by <a class="todox-panel__credit-link" target="_blank" rel="noopener noreferrer"></a>
+          </p>
+          <div class="todox-panel__promo" hidden></div>
+        </footer>
+      </div>
     `;
 
     this.activeListEl = container.querySelector('.todox-list--active');
+    this.panelBody = container.querySelector('.todox-panel__body');
     this.completedContainer = container.querySelector('.todox-done');
     this.completedSection = container.querySelector('.todox-done__details');
     this.completedListEl = container.querySelector('.todox-done__list');
@@ -804,7 +929,9 @@ class TodoXApp {
     this.telemetryToggle = container.querySelector('.todox-telemetry-toggle__input');
     this.archiveButton = container.querySelector('.todox-done__archive');
     const historyButton = container.querySelector('.todox-history-button');
+    this.collapseButton = container.querySelector('.todox-collapse-button');
     historyButton?.addEventListener('click', () => this.openHistory());
+    this.collapseButton?.addEventListener('click', () => this.togglePanelCollapse());
     this.focusSponsorDismissButton?.addEventListener('click', () => {
       // If a sponsor id is present on the element, mark it dismissed explicitly.
       const sponsorId = this.focusSponsorEl?.dataset?.sponsorId;
@@ -849,6 +976,29 @@ class TodoXApp {
       promo.hidden = false;
     }
 
+    if (typeof window !== 'undefined') {
+      if (!this.boundResizeHandler) {
+        this.boundResizeHandler = () => this.updatePanelPlaceholderHeight();
+        window.addEventListener('resize', this.boundResizeHandler, { passive: true });
+      }
+      if (typeof ResizeObserver !== 'undefined') {
+        if (this.panelResizeObserver) {
+          try {
+            this.panelResizeObserver.disconnect();
+          } catch (error) {
+            // ignore disconnect errors
+          }
+        }
+        this.panelResizeObserver = new ResizeObserver(() => this.updatePanelPlaceholderHeight());
+        try {
+          this.panelResizeObserver.observe(container);
+        } catch (error) {
+          // ignore observe errors
+        }
+      }
+    }
+
+    this.applyCollapseState(container, this.isCollapsed);
     return container;
   }
 
@@ -1158,6 +1308,7 @@ class TodoXApp {
     this.renderCompletedTasks(completedTasks);
     this.updateProgress(activeTasks.length, completedTasks.length);
     this.updateAnalytics();
+    this.updatePanelPlaceholderHeight();
   }
 
   renderActiveTasks(activeTasks) {

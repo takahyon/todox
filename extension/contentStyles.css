@@ -14,9 +14,10 @@
   --todox-warning: #ffd166;
   --todox-error: #ff8ba7;
 
-  position: sticky;
-  top: 16px;
-  z-index: 5;
+  position: fixed;
+  top: calc(16px + env(safe-area-inset-top, 0px));
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  z-index: 400;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -27,6 +28,75 @@
   font-family: "Helvetica Neue", Arial, sans-serif;
   box-shadow: 0 12px 24px rgba(15, 20, 25, 0.25);
   backdrop-filter: blur(12px);
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px - env(safe-area-inset-top, 0px));
+  overflow: hidden;
+}
+
+.todox-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.todox-panel__body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.todox-panel__body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+}
+
+.todox-panel__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.todox-panel__placeholder {
+  height: 0;
+  width: 100%;
+  pointer-events: none;
+}
+
+.todox-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.todox-collapse-button {
+  background: transparent;
+  border: none;
+  color: var(--todox-text-secondary);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.todox-collapse-button:hover {
+  background: var(--todox-card-bg);
+  color: var(--todox-text-primary);
+  transform: translateY(-1px);
+}
+
+.todox-collapse-button:focus-visible {
+  outline: 2px solid var(--todox-accent);
+  outline-offset: 2px;
+}
+
+.todox-panel--collapsed {
+  max-height: none;
+}
+
+.todox-panel--collapsed .todox-panel__header {
+  margin-bottom: 0;
 }
 
 .todox-panel__header {
