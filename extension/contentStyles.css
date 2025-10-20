@@ -93,10 +93,22 @@
 
 .todox-panel--collapsed {
   max-height: none;
+  gap: 8px;
+  padding-bottom: 12px;
 }
 
 .todox-panel--collapsed .todox-panel__header {
   margin-bottom: 0;
+}
+
+.todox-panel--collapsed .todox-panel__progress,
+.todox-panel--collapsed .todox-panel__hint,
+.todox-panel--collapsed .todox-focus-sponsor {
+  display: none;
+}
+
+.todox-panel--collapsed .todox-panel__body {
+  display: none;
 }
 
 .todox-panel__header {

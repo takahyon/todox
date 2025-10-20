@@ -651,12 +651,9 @@ class TodoXApp {
       return;
     }
     panel.classList.toggle("todox-panel--collapsed", collapsed);
+    panel.setAttribute("aria-expanded", String(!collapsed));
     if (this.panelBody) {
-      if (collapsed) {
-        this.panelBody.setAttribute("hidden", "");
-      } else {
-        this.panelBody.removeAttribute("hidden");
-      }
+      this.panelBody.toggleAttribute("hidden", Boolean(collapsed));
     }
     if (this.collapseButton) {
       this.collapseButton.setAttribute("aria-expanded", String(!collapsed));
