@@ -1,12 +1,12 @@
 .todox-panel {
-  --todox-panel-bg: rgba(15, 20, 25, 0.78);
-  --todox-card-bg: rgba(255, 255, 255, 0.06);
-  --todox-card-hover: rgba(255, 255, 255, 0.09);
-  --todox-card-accent: rgba(29, 155, 240, 0.08);
-  --todox-border-subtle: rgba(255, 255, 255, 0.05);
+  --todox-panel-bg: rgba(15, 20, 25, 0.9);
+  --todox-card-bg: rgba(255, 255, 255, 0.05);
+  --todox-card-hover: rgba(255, 255, 255, 0.08);
+  --todox-card-accent: rgba(29, 155, 240, 0.1);
+  --todox-border-subtle: rgba(255, 255, 255, 0.08);
   --todox-accent: rgba(29, 155, 240, 0.9);
-  --todox-accent-soft: rgba(29, 155, 240, 0.18);
-  --todox-accent-soft-hover: rgba(29, 155, 240, 0.28);
+  --todox-accent-soft: rgba(29, 155, 240, 0.2);
+  --todox-accent-soft-hover: rgba(29, 155, 240, 0.3);
   --todox-text-primary: #f7f9f9;
   --todox-text-secondary: rgba(247, 249, 249, 0.82);
   --todox-text-muted: rgba(247, 249, 249, 0.6);
@@ -14,19 +14,135 @@
   --todox-warning: #ffd166;
   --todox-error: #ff8ba7;
 
-  position: sticky;
-  top: 16px;
-  z-index: 5;
+  position: fixed;
+  top: calc(var(--todox-anchor-top, 16px) + env(safe-area-inset-top, 0px));
+  right: calc(var(--todox-anchor-right, 16px) + env(safe-area-inset-right, 0px));
+  z-index: var(--todox-panel-z-index, 3);
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 16px;
   border-radius: 16px;
+  border: 1px solid var(--todox-border-subtle);
   background: var(--todox-panel-bg);
   color: var(--todox-text-primary);
   font-family: "Helvetica Neue", Arial, sans-serif;
-  box-shadow: 0 12px 24px rgba(15, 20, 25, 0.25);
+  box-shadow: 0 18px 36px rgba(15, 20, 25, 0.28);
   backdrop-filter: blur(12px);
+  width: min(var(--todox-anchor-width, 320px), calc(100vw - 32px));
+  max-height: calc(100vh - var(--todox-anchor-top, 16px) - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow: hidden;
+  transition: box-shadow 0.25s ease, transform 0.25s ease, padding 0.25s ease;
+}
+
+.todox-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.todox-panel__body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.todox-panel__body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+}
+
+.todox-panel__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.todox-panel__placeholder {
+  height: 0;
+  width: 100%;
+  pointer-events: none;
+}
+
+.todox-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.todox-collapse-button {
+  background: transparent;
+  border: none;
+  color: var(--todox-text-secondary);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.todox-collapse-button:hover {
+  background: var(--todox-card-bg);
+  color: var(--todox-text-primary);
+  transform: translateY(-1px);
+}
+
+.todox-collapse-button:focus-visible {
+  outline: 2px solid var(--todox-accent);
+  outline-offset: 2px;
+}
+
+.todox-panel--collapsed {
+  gap: 8px;
+  padding: 14px 16px;
+}
+
+.todox-panel--collapsed .todox-panel__header {
+  margin-bottom: 0;
+}
+
+.todox-panel--collapsed .todox-panel__progress,
+.todox-panel--collapsed .todox-panel__hint,
+.todox-panel--collapsed .todox-focus-sponsor,
+.todox-panel--collapsed .todox-done,
+.todox-panel--collapsed .todox-settings,
+.todox-panel--collapsed .todox-panel__footer {
+  display: none;
+}
+
+.todox-panel--collapsed .todox-panel__body {
+  gap: 6px;
+  padding-right: 0;
+}
+
+.todox-panel--collapsed .todox-list {
+  gap: 6px;
+}
+
+.todox-panel--collapsed .todox-list__item {
+  padding: 10px 12px;
+}
+
+.todox-panel--collapsed .todox-list__item:not(.todox-list__item--new) {
+  display: none;
+}
+
+.todox-panel--collapsed .todox-list__item--new {
+  background: var(--todox-card-accent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+.todox-panel--collapsed .todox-actions,
+.todox-panel--collapsed .todox-plus {
+  display: none;
+}
+
+.todox-panel--collapsed .todox-input {
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: var(--todox-panel-bg);
+  border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
 .todox-panel__header {
