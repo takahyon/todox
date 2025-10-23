@@ -9,11 +9,10 @@
       "matches": ["https://x.com/*", "https://twitter.com/*"],
       "js": [
         "lib/verifyLicense.js",
-        "lib/sponsorLogic.js",
-        "branding.js",
+        "lib/sponsors.js",
         "premium.js",
-        "sponsors.js",
-        "contentScript.js"
+        "dist/panel.js",
+        "minContentScript.js"
       ],
       "css": ["contentStyles.css"],
       "run_at": "document_idle"
@@ -22,9 +21,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "branding.js",
         "completed.html",
-        "completed.js",
+        "dist/completed.js",
         "completed.css",
         "sponsors.json"
       ],

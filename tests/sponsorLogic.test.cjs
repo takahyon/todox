@@ -1,11 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+// Updated to point to merged sponsors utilities after cleanup.
 const {
   isActiveSponsor,
   selectWeightedSponsor,
   canShowUnderFrequency,
   recordImpression,
-} = require('../extension/lib/sponsorLogic.js');
+} = require('../extension/lib/sponsors.js');
 
 class MemoryStorage {
   constructor() {

@@ -64,12 +64,23 @@ npx todox-license sign --key ../secrets/license_ed25519.key --features themes,fo
 4. X.com を開くと、右サイドバー上部に TodoX パネルが表示されます。
 5. タスクの履歴やエクスポートはパネル右上の「履歴を開く」ボタンからアクセスできます。
 
-## ファイル構成
+## 現在のファイル構成 (Svelte 化後)
 
 - `extension/manifest.json` — 拡張機能の定義 (Manifest V3)。
-- `extension/contentScript.js` — サイドバーの調整と TODO リストの実装。
-- `extension/contentStyles.css` — TODO リストと折りたたみ UI のスタイル。
-- `extension/completed.html` / `extension/completed.js` / `extension/completed.css` — 完了タスク履歴ページとエクスポート UI。
+- `extension/minContentScript.js` — 右サイドバー領域の折りたたみ + Svelte パネルのマウントのみを行う最小スクリプト。
+- `extension/premium.js` — TodoX+ ライセンス検証とテーマ / BGM / テレメトリ設定 (軽量版)。
+- `extension/lib/verifyLicense.js` — Ed25519 署名付きライセンスの検証ライブラリ。
+- `extension/lib/sponsors.js` — スポンサー選択ロジック（重み付き抽選 + 表示頻度キャップ + Dismiss 状態管理）。
+- `extension/sponsors.json` — 開発用のスポンサー在庫 JSON (本番は `SPONSORS_URL` 指定可)。
+- `extension/contentStyles.css` — パネルと履歴ページのスタイル（必要最低限）。
+- `extension/completed.html` / `extension/completed.css` — 履歴ページ HTML + 付随スタイル。
+- `extension/dist/completed.js` / `extension/dist/panel.js` — Vite が生成する Svelte バンドル。
+- `src/content/TaskPanel.svelte` — タスク / フォーカス / 完了 / 昇華 UI の Svelte コンポーネント。
+- `src/content/main.js` — TaskPanel のマウントと外部ストレージ変更購読。
+- `src/completed/App.svelte` — 履歴ページ UI の Svelte コンポーネント。
+- `src/completed/main.js` — 履歴ページコンポーネントのマウント。
+- `src/lib/store.js` — tasks / history の読み込み・永続化・派生ストア。
+- `src/lib/state.js` — 正規化・時間計測・フォーマット補助関数。
 
 ## 開発メモ
 
@@ -86,3 +97,59 @@ npm test
 - 期限・担当者といったメタ情報の追加。
 - Light/Dark テーマの切り替えや、X のカラーパレットへの追従。
 - モバイル (Chrome for Android) への対応検討。
+
+## リファクタリング進捗と今後のロードマップ
+
+2025-10: 大規模な Imperative 実装だった `contentScript.js` / `completed.js` を段階的に解体し、Svelte コンポーネントとストアへ移行しました。スポンサー関連は 2 ファイル (148 + 121 行) を 1 ファイル (56 行) に統合、プレミアム管理は 220 行から 54 行へ縮小しています。
+
+完了済み:
+- 履歴ページ Svelte 化 (`App.svelte` + ビルドエントリ)。
+- タスクパネル Svelte 化 (集中タイマー / 昇華 / Share など)。
+- 最小コンテンツスクリプト化 (`minContentScript.js`)。
+- スポンサー選択・頻度キャップ統合 (`lib/sponsors.js`)。
+- ライセンス設定軽量化 (`premium.js` リライト)。
+
+次段階候補:
+1. スポンサー表示を独立 Svelte コンポーネントへ分離し再描画抑制。
+2. フォーカスタイマーの tick 最適化 (アクティブ時のみ 1 秒更新、非アクティブ時は停止)。
+3. 永続化書き込みをバッチ化 (短時間の複数操作を 1 回の storage 書き込みに集約)。
+4. テーマ / BGM を Svelte store 化してリアルタイム反映 (DOM クラス切替最小化)。
+5. Telemetry をオプトインストアにまとめ差分 sendBeacon。
+
+## Svelte / Vite ビルド
+
+現在 `completed.html` は Svelte 版に差し替え済みです。初回セットアップ:
+
+```
+npm install
+npm run build
+```
+
+生成物: `extension/dist/completed.js` が履歴ページで読み込まれます。
+
+開発モードでホットリロードしたい場合 (拡張では直接反映されないため主に UI 調整用途):
+```
+npm run dev
+```
+その後ローカルサーバで配信されるバンドルを `completed.html` の script タグを一時的に書き換えて確認できます (拡張パッケージとして確認する場合は通常どおり build 後のファイルを使用)。
+
+旧 `contentScript.js` の UI はすでに `TaskPanel.svelte` へ移行済みで、残余処理は `minContentScript.js` のみです。
+
+## コード削減状況 (2025-10-23 現在)
+
+旧 `contentScript.js` (~1743 行) / `completed.js` などを撤去し、現在は以下の構成 & 行数 (概数):
+
+- `TaskPanel.svelte` ~185 行
+- `App.svelte` (履歴) ~150 行弱
+- `store.js` ~91 行
+- `premium.js` 54 行 (220 → 54 行)
+- `lib/sponsors.js` 56 行 (269 行相当 → 56 行)
+
+タスク + 履歴 + 認証 + スポンサー周辺を合わせても ~540 行程度で、初期の巨大スクリプト比で大幅に縮小しています。
+
+追加削減候補 (再掲):
+1. アクティブタスク時のみタイマー tick。
+2. 永続化書き込みのバッチ化。
+3. スポンサー UI コンポーネント化。
+4. 設定 (テーマ / BGM / Telemetry) を単一設定ストアに統合。
+5. さらなる行数計測と差分表の自動生成スクリプト化。

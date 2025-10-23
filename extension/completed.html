@@ -7,39 +7,8 @@
     <link rel="stylesheet" href="completed.css" />
   </head>
   <body>
-    <main class="todox-history">
-      <header class="todox-history__header">
-        <div>
-          <h1 class="todox-history__title">TodoX 履歴</h1>
-          <p class="todox-history__subtitle">完了したタスクやフォーカスタイムを振り返って、次のアクションに活かしましょう。</p>
-        </div>
-        <button id="exportButton" class="todox-history__export" type="button">データをエクスポート</button>
-      </header>
-
-      <section class="todox-history__section">
-        <h2 class="todox-history__section-title">今日のフォーカス</h2>
-        <div id="focusSummary" class="todox-history__summary">読み込み中…</div>
-      </section>
-
-      <section class="todox-history__section">
-        <h2 class="todox-history__section-title">完了タスク一覧</h2>
-        <p id="historyEmpty" class="todox-history__empty" hidden>まだ完了したタスクはありません。</p>
-        <ul id="historyList" class="todox-history__list"></ul>
-      </section>
-
-      <section class="todox-history__section">
-        <h2 class="todox-history__section-title">現在のTODO</h2>
-        <p id="tasksEmpty" class="todox-history__empty" hidden>現在アクティブなTODOはありません。</p>
-        <ul id="tasksList" class="todox-history__list"></ul>
-      </section>
-
-      <footer class="todox-history__footer">
-        <p class="todox-history__credit">developed by <a id="historyDeveloper" href="https://x.com/TakaAizu" target="_blank" rel="noopener noreferrer"></a></p>
-        <div id="historyPromo" class="todox-history__promo" hidden></div>
-      </footer>
-    </main>
-
-    <script src="branding.js" defer></script>
-    <script src="completed.js" defer></script>
+    <div id="todox-root"></div>
+    <!-- Built Svelte bundle (after running vite build) -->
+    <script type="module" src="dist/completed.js"></script>
   </body>
 </html>
