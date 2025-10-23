@@ -823,6 +823,70 @@ class TodoXApp {
       const clampedTop = Math.max(topOffset, 16);
       this.panel.style.setProperty('--todox-anchor-top', `${clampedTop}px`);
     }
+
+    this.updatePanelZIndex();
+  }
+
+  findSearchAnchorElement() {
+    if (typeof document === 'undefined') {
+      return null;
+    }
+
+    const searchSelectors = [
+      'header[role="banner"] form[role="search"]',
+      'header[role="banner"] [data-testid="SearchBox_Search_Input"]',
+      'header[role="banner"] [data-testid="SearchBox_Search_Link"]',
+      '[data-testid="SearchBox_Search_Input"]',
+      'form[role="search"]',
+    ];
+
+    for (const selector of searchSelectors) {
+      const element = document.querySelector(selector);
+      if (element) {
+        return element.closest('header[role="banner"]') || element.closest('[data-testid="toolBar"]') || element;
+      }
+    }
+
+    return document.querySelector('header[role="banner"]');
+  }
+
+  updatePanelZIndex() {
+    if (!this.panel || typeof window === 'undefined') {
+      return;
+    }
+
+    const anchor = this.findSearchAnchorElement();
+    if (!anchor) {
+      this.panel.style.setProperty('--todox-panel-z-index', '3');
+      return;
+    }
+
+    let current = anchor;
+    let resolvedZIndex = null;
+
+    while (current) {
+      const style = window.getComputedStyle(current);
+      if (!style) {
+        break;
+      }
+
+      const position = style.position;
+      const zIndexValue = Number.parseInt(style.zIndex, 10);
+
+      if (position && position !== 'static' && Number.isFinite(zIndexValue)) {
+        resolvedZIndex = zIndexValue;
+        break;
+      }
+
+      current = current.parentElement;
+    }
+
+    if (typeof resolvedZIndex === 'number' && Number.isFinite(resolvedZIndex)) {
+      const targetZ = Math.max(0, resolvedZIndex - 1);
+      this.panel.style.setProperty('--todox-panel-z-index', `${targetZ}`);
+    } else {
+      this.panel.style.setProperty('--todox-panel-z-index', '3');
+    }
   }
 
   createPanel() {

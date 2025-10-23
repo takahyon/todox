@@ -17,7 +17,7 @@
   position: fixed;
   top: calc(var(--todox-anchor-top, 16px) + env(safe-area-inset-top, 0px));
   right: calc(var(--todox-anchor-right, 16px) + env(safe-area-inset-right, 0px));
-  z-index: 400;
+  z-index: var(--todox-panel-z-index, 3);
   display: flex;
   flex-direction: column;
   gap: 12px;
